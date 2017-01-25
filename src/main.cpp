@@ -1,4 +1,5 @@
 #include <iostream>
+#include <sstream>
 #include <memory>
 #include <string>
 #include <fstream>
@@ -7,9 +8,7 @@
 #include <map>
 #include <set>
 #include <type_traits>
-
-#define TINYOBJLOADER_IMPLEMENTATION // define this in only *one* .cc
-#include "tiny_obj_loader.h"
+#include <regex>
 
 template <typename T>
 auto BitmaskFlag(T flag)
@@ -20,31 +19,35 @@ auto BitmaskFlag(T flag)
 
 static const std::uint8_t BOM_DATA_VERSION = 1;
 
+typedef std::uint16_t obj_index_t;
+
 // BOM
-enum class FileDataAttribute : std::uint8_t
+enum class FileDataAttribute : std::uint16_t
 {
     NONE = 1 << 0,
     MATERIAL_LIBRARY = 1 << 1
 
 };
 
-enum class GroupDataAttribute : std::uint8_t
+enum class GroupDataAttribute : std::uint16_t
 {
     NONE = 1 << 0,
-    INDEX = 1 << 1,
-    SMOOTHING = 1 << 2,
-    MATERIAL = 1 << 3
+	NAME = 1 << 1,
+    INDEX = 1 << 2,
+    SMOOTHING = 1 << 3,
+    MATERIAL = 1 << 4
 
 };
 
-enum class ObjectDataAttribute : std::uint8_t
+enum class ObjectDataAttribute : std::uint16_t
 {
     NONE = 1 << 0,
-    GEOMETRY = 1 << 1
+	NAME = 1 << 1,
+    GEOMETRY = 1 << 2
 
 };
 
-enum class GeometryDataAttribute : std::uint32_t
+enum class GeometryDataAttribute : std::uint16_t
 {
     NONE = 1 << 0,
     NORMAL = 1 << 1,
@@ -99,7 +102,7 @@ struct alignas(1) obj_vector2_t
 
 struct alignas(1) obj_face3_t
 {
-    std::uint16_t a, b, c;
+    obj_index_t a, b, c;
 
 };
 
@@ -107,6 +110,20 @@ struct alignas(1) mtl_color_t
 {
     float r, g, b;
 
+};
+
+struct mtl_map_t
+{
+	decltype(BitmaskFlag(MapDataAttribute::NONE)) attributes;
+	std::string path;
+	obj_vector2_t scale, offset;
+	union
+	{
+		float bumpScale;
+		float displacementScale;
+
+	};
+	
 };
 
 // MTL Properties
@@ -118,6 +135,7 @@ struct mtl_material_t
     std::uint8_t illuminationModel;
     float specularExponent, opticalDensity, dissolve;
     mtl_color_t transmissionFilter, ambientReflectance, diffuseReflectance, specularReflectance, emissiveReflectance;
+	mtl_map_t ambientMap, diffuseMap, specularMap, emissiveMap, dissolveMap, bumpMap, displacementMap;
 
 };
 
@@ -133,13 +151,14 @@ struct obj_group_t
 {
     std::uint16_t materialId;
     std::string name, materialName;
-    std::uint8_t smoothing = 0;
+    std::uint8_t smoothing = 1;
     std::vector<obj_face3_t> faces;
 
 };
 
 struct obj_object_t
 {
+	std::uint32_t containerId;
     std::string name;
     std::vector<obj_vector3_t> positions;
     std::vector<obj_vector3_t> normals;
@@ -154,6 +173,7 @@ struct obj_state_t
     std::string materialFileName, materialName;
     std::vector<std::shared_ptr<obj_object_t>> objects;
     std::shared_ptr<mtl_state_t> mtlState;
+	std::uint8_t smoothing = 1;
 
 };
 
@@ -161,9 +181,13 @@ std::vector<std::shared_ptr<obj_state_t>> objStates;
 std::vector<std::shared_ptr<mtl_state_t>> mtlStates;
 std::uint16_t maxMaterialId = 0;
 
+bool createIndexedGeometry = true;
+bool logWarnings = true;
+bool logErrors = true;
+
 bool WriteBOM(const std::string &bomFilePath)
 {
-    std::cout << "Writing BOM..." << std::endl;
+    std::cout << "Writing BOM '" << bomFilePath << "'..." << std::endl;
 
     // BOM Writer
     std::ofstream bomFile;
@@ -230,6 +254,194 @@ bool WriteBOM(const std::string &bomFilePath)
                 // Emissive Reflectance (Ke)
                 if(materialAttributes & BitmaskFlag(MaterialDataAttribute::EMISSIVE_REFLECTANCE)) bomFile.write(reinterpret_cast<char*>(&material.second->emissiveReflectance), sizeof(material.second->emissiveReflectance));
 
+                // Ambient Map (map_Ka)
+                if(materialAttributes & BitmaskFlag(MaterialDataAttribute::AMBIENT_MAP))
+				{
+					const auto map = &material.second->ambientMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+
+				}
+				
+                // Diffuse Map (map_Kd)
+                if(materialAttributes & BitmaskFlag(MaterialDataAttribute::DIFFUSE_MAP))
+				{
+					const auto map = &material.second->diffuseMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+
+				}
+				
+                // Specular Map (map_Kd)
+                if(materialAttributes & BitmaskFlag(MaterialDataAttribute::SPECULAR_MAP))
+				{
+					const auto map = &material.second->specularMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+
+				}
+				
+                // Emissive Map (map_Ke)
+                if(materialAttributes & BitmaskFlag(MaterialDataAttribute::EMISSIVE_MAP))
+				{
+					const auto map = &material.second->emissiveMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+
+				}
+				
+                // Dissolve Map (map_d)
+                if(materialAttributes & BitmaskFlag(MaterialDataAttribute::DISSOLVE_MAP))
+				{
+					const auto map = &material.second->dissolveMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+
+				}
+				
+                // Bump Map (map_bump / bump)
+                if(materialAttributes & BitmaskFlag(MaterialDataAttribute::BUMP_MAP))
+				{
+					const auto map = &material.second->bumpMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+					
+					// Map Bump Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::BUMP_SCALE)) bomFile.write(reinterpret_cast<char*>(&map->bumpScale), sizeof(map->bumpScale));
+
+				}
+				
+                // Displacement Map (map_disp / disp)
+                if(materialAttributes & BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP))
+				{
+					const auto map = &material.second->displacementMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+					
+					// Map Displacement Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::BUMP_SCALE)) bomFile.write(reinterpret_cast<char*>(&map->displacementScale), sizeof(map->displacementScale));
+
+				}
+
             }
 
         }
@@ -247,14 +459,21 @@ bool WriteBOM(const std::string &bomFilePath)
         {
             // Object Data Attributes
             auto objectAttributes = BitmaskFlag(ObjectDataAttribute::NONE);
+			if(!object->name.empty()) objectAttributes |= BitmaskFlag(ObjectDataAttribute::NAME);
             if(!object->positions.empty()) objectAttributes |= BitmaskFlag(ObjectDataAttribute::GEOMETRY);
             bomFile.write(reinterpret_cast<char*>(&objectAttributes), sizeof(objectAttributes));
+			
+			// Container ID
+			bomFile.write(reinterpret_cast<char*>(&object->containerId), sizeof(object->containerId));
 
             // Object Name
-            std::uint16_t objectNameLength = object->name.size();
-            bomFile.write(reinterpret_cast<char*>(&objectNameLength), sizeof(objectNameLength));
-            bomFile.write(object->name.c_str(), objectNameLength);
-            std::cout << "Object Name: " << object->name << std::endl;
+			if(objectAttributes & BitmaskFlag(ObjectDataAttribute::NAME))
+			{
+				std::uint16_t objectNameLength = object->name.size();
+				bomFile.write(reinterpret_cast<char*>(&objectNameLength), sizeof(objectNameLength));
+				bomFile.write(object->name.c_str(), objectNameLength);
+
+			}
 
             if(objectAttributes & BitmaskFlag(ObjectDataAttribute::GEOMETRY))
             {
@@ -287,17 +506,20 @@ bool WriteBOM(const std::string &bomFilePath)
             {
                 // Group Data Attributes
                 auto groupAttributes = BitmaskFlag(GroupDataAttribute::NONE);
+				if(!group->name.empty()) groupAttributes |= BitmaskFlag(GroupDataAttribute::NAME);
                 if(!group->faces.empty()) groupAttributes |= BitmaskFlag(GroupDataAttribute::INDEX);
                 if(group->smoothing >= 0) groupAttributes |= BitmaskFlag(GroupDataAttribute::SMOOTHING);
                 if(!group->materialName.empty() && objState->mtlState && objState->mtlState->materials.find(group->materialId) != objState->mtlState->materials.end()) groupAttributes |= BitmaskFlag(GroupDataAttribute::MATERIAL);
                 bomFile.write(reinterpret_cast<char*>(&groupAttributes), sizeof(groupAttributes));
 
                 // Group Name
-                std::uint16_t groupNameLength = group->name.size();
-                bomFile.write(reinterpret_cast<char*>(&groupNameLength), sizeof(groupNameLength));
-                bomFile.write(group->name.c_str(), groupNameLength);
+				if(groupAttributes & BitmaskFlag(GroupDataAttribute::NAME))
+				{
+					std::uint16_t groupNameLength = group->name.size();
+					bomFile.write(reinterpret_cast<char*>(&groupNameLength), sizeof(groupNameLength));
+					bomFile.write(group->name.c_str(), groupNameLength);
 
-                std::cout << "Group Name: " << group->name << std::endl;
+				}
 
                 if(objectAttributes & BitmaskFlag(ObjectDataAttribute::GEOMETRY))
                 {
@@ -305,12 +527,11 @@ bool WriteBOM(const std::string &bomFilePath)
                     if(groupAttributes & BitmaskFlag(GroupDataAttribute::INDEX))
                     {
                         // Index Count
-                        std::uint16_t indexCount = group->faces.size() * 3;
+                        std::uint32_t indexCount = group->faces.size() * 3;
                         bomFile.write(reinterpret_cast<char*>(&indexCount), sizeof(indexCount));
-                        std::cout << "Index Count: " << indexCount << std::endl;
 
                         // Indices
-                        bomFile.write(reinterpret_cast<char*>(group->faces.data()), sizeof(std::uint16_t) * indexCount);
+                        bomFile.write(reinterpret_cast<char*>(group->faces.data()), sizeof(obj_index_t) * indexCount);
 
                     }
 
@@ -319,7 +540,6 @@ bool WriteBOM(const std::string &bomFilePath)
 
                     if(groupAttributes & BitmaskFlag(GroupDataAttribute::MATERIAL))
                     {
-                        std::cout << "Material: " << group->materialName << ", ID: " << objState->mtlState->materials[group->materialId]->id << std::endl;
                         // Material ID
                         std::uint16_t materialId = objState->mtlState->materials[group->materialId]->id;
                         bomFile.write(reinterpret_cast<char*>(&materialId), sizeof(materialId));
@@ -339,10 +559,10 @@ bool WriteBOM(const std::string &bomFilePath)
 
 }
 
-bool ReadMTL(std::shared_ptr<obj_state_t> objState)
+bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objState)
 {
     // MTL Parser
-    std::ifstream mtlFile(objState->materialFileName);
+    std::ifstream mtlFile(relativePath + objState->materialFileName);
     if(!mtlFile.is_open()) return false;
 
     auto mtlState = std::make_shared<mtl_state_t>();
@@ -354,10 +574,13 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
     std::shared_ptr<mtl_material_t> material = std::make_shared<mtl_material_t>();
     material->id = maxMaterialId++;
 
-    std::cout << "Parsing MTL..." << std::endl;
+    std::cout << "Parsing MTL '" << objState->materialFileName << "'..." << std::endl;
     std::string line;
+	int lineNo = -1;
+
     while(std::getline(mtlFile, line))
     {
+		++lineNo;
         std::istringstream iss(line);
         //std::cout << line << "\n";
         if(line.empty()) continue;
@@ -365,7 +588,7 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
         std::string entryType;
         if(!(iss >> entryType))
         {
-            std::cout << "Error parsing MTL, could not parse entry type." << std::endl;
+			if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Failed to parse entry type." << std::endl;
             break;
 
         }
@@ -381,7 +604,7 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
 
             if(!(iss >> material->name))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
@@ -389,13 +612,12 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
             mtlState->materials.insert(std::make_pair(material->id, material));
             //std::cout << "Material: " << material->name << std::endl;
 
-
         }
         else if(entryType == "illum")
         {
             if(!(iss >> material->illuminationModel))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
@@ -407,7 +629,7 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
         {
             if(!(iss >> material->specularExponent))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
@@ -419,7 +641,7 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
         {
             if(!(iss >> material->opticalDensity))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
@@ -431,7 +653,7 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
         {
             if(!(iss >> material->dissolve))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
@@ -441,80 +663,190 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
         }
         else if(entryType == "Tr")
         {
-            if(!(iss >> material->dissolve))
-            {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
-                break;
+			if(!(material->attributes & BitmaskFlag(MaterialDataAttribute::DISSOLVE)))
+			{
+				if(!(iss >> material->dissolve))
+				{
+					if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+					break;
 
-            }
+				}
 
-            material->dissolve = 1.0f - material->dissolve;
-            material->attributes |= BitmaskFlag(MaterialDataAttribute::DISSOLVE);
+				material->dissolve = 1.0f - material->dissolve;
+				material->attributes |= BitmaskFlag(MaterialDataAttribute::DISSOLVE);
+
+			}
+			else
+			{
+				if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Transparency (Tr) property is non-standard, defaulting to Dissolve (d)." << std::endl;
+				
+			}
 
         }
         else if(entryType == "Tf")
         {
-            if(!(iss >> material->transmissionFilter.r >> material->transmissionFilter.g >> material->transmissionFilter.b))
+            if(!(iss >> material->transmissionFilter.r))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
 
+            if(!(iss >> material->transmissionFilter.g >> material->transmissionFilter.b)) material->transmissionFilter.b = material->transmissionFilter.g = material->transmissionFilter.r;
             material->attributes |= BitmaskFlag(MaterialDataAttribute::TRANSMISSION_FILTER);
 
         }
         else if(entryType == "Ka")
         {
-            if(!(iss >> material->ambientReflectance.r >> material->ambientReflectance.g >> material->ambientReflectance.b))
+            if(!(iss >> material->ambientReflectance.r))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
-
+			
+			if(!(iss >> material->ambientReflectance.g >> material->ambientReflectance.b)) material->ambientReflectance.b = material->ambientReflectance.g = material->ambientReflectance.r;
             material->attributes |= BitmaskFlag(MaterialDataAttribute::AMBIENT_REFLECTANCE);
 
         }
         else if(entryType == "Kd")
         {
-            if(!(iss >> material->diffuseReflectance.r >> material->diffuseReflectance.g >> material->diffuseReflectance.b))
+            if(!(iss >> material->diffuseReflectance.r))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
-
+			
+			if(!(iss >> material->diffuseReflectance.g >> material->diffuseReflectance.b)) material->diffuseReflectance.b = material->diffuseReflectance.g = material->diffuseReflectance.r;
             material->attributes |= BitmaskFlag(MaterialDataAttribute::DIFFUSE_REFLECTANCE);
 
         }
         else if(entryType == "Ks")
         {
-            if(!(iss >> material->specularReflectance.r >> material->specularReflectance.g >> material->specularReflectance.b))
+            if(!(iss >> material->specularReflectance.r))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
-
+			
+			if(!(iss >> material->specularReflectance.g >> material->specularReflectance.b)) material->specularReflectance.b = material->specularReflectance.g = material->specularReflectance.r;
             material->attributes |= BitmaskFlag(MaterialDataAttribute::SPECULAR_REFLECTANCE);
 
         }
         else if(entryType == "Ke")
         {
-            if(!(iss >> material->emissiveReflectance.r >> material->emissiveReflectance.g >> material->emissiveReflectance.b))
+            if(!(iss >> material->emissiveReflectance.r))
             {
-                std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                break;
+
+            }
+			
+			if(!(iss >> material->emissiveReflectance.g >> material->emissiveReflectance.b)) material->emissiveReflectance.b = material->emissiveReflectance.g = material->emissiveReflectance.r;
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::EMISSIVE_REFLECTANCE);
+
+        }
+        else if(entryType == "map_Ka")
+        {
+            if(!(iss >> material->ambientMap.path))
+            {
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                break;
+
+            }
+			
+			material->ambientMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::AMBIENT_MAP);
+
+        }
+        else if(entryType == "map_Kd")
+        {
+            if(!(iss >> material->diffuseMap.path))
+            {
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                break;
+
+            }
+			
+			material->diffuseMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::DIFFUSE_MAP);
+
+        }
+        else if(entryType == "map_Ks")
+        {
+            if(!(iss >> material->specularMap.path))
+            {
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                break;
+
+            }
+			
+			material->specularMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::SPECULAR_MAP);
+
+        }
+        else if(entryType == "map_Ke")
+        {
+            if(!(iss >> material->emissiveMap.path))
+            {
+				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                break;
+
+            }
+			
+			material->emissiveMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::EMISSIVE_MAP);
+
+        }
+        else if(entryType == "map_d")
+        {
+            if(!(iss >> material->dissolveMap.path))
+            {
+				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                break;
+
+            }
+			
+			material->dissolveMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::DISSOLVE_MAP);
+
+        }
+        else if(entryType == "map_bump" || entryType == "bump")
+        {
+            if(!(iss >> material->bumpMap.path))
+            {
+				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                 break;
 
             }
 
-            material->attributes |= BitmaskFlag(MaterialDataAttribute::EMISSIVE_REFLECTANCE);
+			material->bumpMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::BUMP_MAP);
 
         }
+        else if(entryType == "map_disp" || entryType == "disp")
+        {
+            if(!(iss >> material->displacementMap.path))
+            {
+                if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                break;
+
+            }
+
+			material->displacementMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+            material->attributes |= BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP);
+
+        }
+		else if(entryType == "#")
+		{
+			continue;
+
+		}
         else
         {
-            //std::cout << entryType << std::endl;
+            if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "]: Unsupported entry type '" << entryType << "'" << std::endl;
 
         }
 
@@ -528,34 +860,69 @@ bool ReadMTL(std::shared_ptr<obj_state_t> objState)
 
 }
 
+// f position.a/uv.a/normal.a position.b/uv.b/normal.b position.c/uv.c/normal.c [position.d/uv.d/normal.d] [position.n/uv.n/normal.n]
+std::regex FACE_POSITION_UV_NORMAL { R"(^f\s+(-?\d+)\/(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\/(-?\d+)(?:\s+(-?\d+)\/(-?\d+)\/(-?\d+))?(?:\s+(-?\d+)\/(-?\d+)\/(-?\d+))?)" };
+
+// f position.a position.b position.c [position.d] [position.n]
+std::regex FACE_POSITION { R"(^f\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+(-?\d+))?(?:\s+(-?\d+))?)" };
+
+// f position.a/uv.a position.b/uv.b position.c/uv.c [position.d/uv.d] [position.n/uv.n]
+std::regex FACE_POSITION_UV { R"(^f\s+(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)(?:\s+(-?\d+)\/(-?\d+))?(?:\s+(-?\d+)\/(-?\d+))?)" };
+
+// f position.a//normal.a position.b//normal.b position.c//normal.c [position.d//normal.d] [position.n//normal.n]
+std::regex FACE_POSITION_NORMAL { R"(^f\s+(-?\d+)\/\/(-?\d+)\s+(-?\d+)\/\/(-?\d+)\s+(-?\d+)\/\/(-?\d+)(?:\s+(-?\d+)\/\/(-?\d+))?(?:\s+(-?\d+)\/\/(-?\d+))?)" };
+
 int main(int argc, char *argv[])
 {
-    std::string bomFilePath = "boat.bom";//"BACK_butterfly_blue.bom";
-    std::vector<std::string> objFilePaths { "boat.obj" };//{ "BACK_butterfly_blue.obj" };
+    std::string bomFilePath;//"BACK_butterfly_blue.bom";
+    std::vector<std::string> objFilePaths;//{ "BACK_butterfly_blue.obj" };
 
     if(argc >= 2) bomFilePath = argv[1];
-    if(bomFilePath.empty()) return 0;
+    if(bomFilePath.empty())
+	{
+		if(logWarnings) std::cout << "WARNING: No BOM file path provided as output. Syntax: obj2bom <output.bom> <input1.obj> [<input2.obj> ... <inputN.obj>]" << std::endl;
+		return 0;
 
-    if(argc >= 3) for(int i = 0; i < (argc - 3); ++i) objFilePaths.push_back(argv[2 + i]);
-    if(objFilePaths.empty()) return 0;
+	}
+
+    if(argc >= 3) for(int i = 0; i < (argc - 2); ++i) objFilePaths.push_back(argv[2 + i]);
+    if(objFilePaths.empty())
+	{
+		if(logWarnings) std::cout << "WARNING: No OBJ file path(s) provided as input. Syntax: obj2bom <output.bom> <input1.obj> [<input2.obj> ... <inputN.obj>]" << std::endl;
+		return 0;
+
+	}
+
+	std::uint32_t maxContainerId = 0;
 
     // OBJ Reader
     for(const auto &objFilePath : objFilePaths)
     {
         bool isFirstObject = true, isFirstGroup = true;
+		std::string objectName = objFilePath.substr(objFilePath.find_last_of("/\\") + 1);
+		std::string relativePath = objFilePath.substr(0, objFilePath.find_last_of("/\\") + 1);
         std::shared_ptr<obj_object_t> object = std::make_shared<obj_object_t>();
+		object->name = objectName;
+		object->containerId = maxContainerId;
         std::shared_ptr<obj_group_t> group = std::make_shared<obj_group_t>();
-        std::map<std::uint16_t, std::pair<obj_vector2_t, obj_vector3_t>> indices;
+
+        std::map<std::string, obj_index_t> indices;
+		std::vector<obj_vector3_t> positions;
+		std::vector<obj_vector3_t> normals;
+		std::vector<obj_vector2_t> uvs;
+		obj_index_t index = 0;
 
         std::ifstream objFile(objFilePath);
-        std::string line, lastEntryType;
+        std::string line;
+		int lineNo = 0;
 
         auto objState = std::make_shared<obj_state_t>();
         objStates.push_back(objState);
 
-        std::cout << "Parsing OBJ..." << std::endl;
+        std::cout << "Parsing OBJ '" << objFilePath << "'..." << std::endl;
         while(std::getline(objFile, line))
         {
+			++lineNo;
             std::istringstream iss(line);
             //std::cout << line << "\n";
             if(line.empty()) continue;
@@ -563,7 +930,7 @@ int main(int argc, char *argv[])
             std::string entryType;
             if(!(iss >> entryType))
             {
-                std::cout << "Error parsing OBJ, could not parse entry type." << std::endl;
+                if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Failed to parse entry type." << std::endl;
                 break;
 
             }
@@ -572,54 +939,32 @@ int main(int argc, char *argv[])
             {
                 if(!(iss >> objState->materialFileName))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
+				
+				objState->materialFileName = objState->materialFileName.substr(objState->materialFileName.find_last_of("/\\") + 1);
 
-                //std::cout << "Material File: " << objState->materialFileName << std::endl;
-                ReadMTL(objState);
+                if(!ReadMTL(relativePath, objState))
+				{
+					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Failed to open material file '" << objState->materialFileName << "'" << std::endl;
+					break;
+
+				}
 
             }
             else if(entryType == "v")
             {
-                if(lastEntryType != "v")
-                {
-                    bool hasUV = !object->uvs.empty(), hasNormal = !object->normals.empty();
-                    if(hasUV || hasNormal)
-                    {
-                        object->uvs.clear();
-                        object->normals.clear();
-
-                        for(auto &index : indices)
-                        {
-                            if(hasUV) object->uvs.push_back(index.second.first);
-                            if(hasNormal) object->normals.push_back(index.second.second);
-
-                        }
-
-                    }
-
-                    indices.clear();
-
-                    if(!isFirstObject) object = std::make_shared<obj_object_t>();
-
-                    objState->objects.push_back(object);
-                    isFirstObject = false;
-                    std::cout << "New Object: " << std::endl;
-
-                }
-
                 obj_vector3_t position;
                 if(!(iss >> position.x >> position.y >> position.z))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
 
-                object->positions.push_back(position);
-                //std::cout << "Position: " << position.x << " " << position.y << " " << position.z << std::endl;
+                positions.push_back(position);
 
             }
             else if(entryType == "vn")
@@ -627,88 +972,74 @@ int main(int argc, char *argv[])
                 obj_vector3_t normal;
                 if(!(iss >> normal.x >> normal.y >> normal.z))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
 
-                object->normals.push_back(normal);
-                //std::cout << "Normal: " << normal.x << " " << normal.y << " " << normal.z << std::endl;
+                normals.push_back(normal);
 
             }
             else if(entryType == "vt")
             {
                 obj_vector2_t uv;
-                if(!(iss >> uv.x >> uv.y))
+				float w;
+				if(!(iss >> uv.x >> uv.y))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
+                else if((iss >> w) && w > 0.0f)
+                {
+					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] 3D texture coordinates are not supported." << std::endl;
+					break;
 
-                object->uvs.push_back(uv);
-                //std::cout << "UV: " << uv.x << " " << uv.y << std::endl;
+                }
+
+                uvs.push_back(uv);
 
             }
             else if(entryType == "g" || entryType == "o")
             {
                 if(!isFirstGroup) group = std::make_shared<obj_group_t>();
+				if(!isFirstObject)
+				{
+					object = std::make_shared<obj_object_t>();
+					object->name = objectName;
+
+				}
+				object->containerId = maxContainerId;
+
+				//positions.clear();
+				//uvs.clear();
+				//normals.clear();
+				indices.clear();
+				index = 0;
 
                 if(!(iss >> group->name))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
 
                 group->materialName = objState->materialName;
                 group->materialId = objState->materialId;
+				group->smoothing = objState->smoothing;
 
                 object->groups.push_back(group);
                 isFirstGroup = false;
-                std::cout << "Group: " << group->name << ", Material: " << group->materialName << ", MaterialID: " << group->materialId << std::endl;
+				
+				objState->objects.push_back(object);
+				isFirstObject = false;
 
-            }/*
-            else if(entryType == "o")
-            {
-                bool hasUV = !object->uvs.empty(), hasNormal = !object->normals.empty();
-                if(hasUV || hasNormal)
-                {
-                    object->uvs.clear();
-                    object->normals.clear();
-
-                    for(auto &index : indices)
-                    {
-                        if(hasUV) object->uvs.push_back(index.second.first);
-                        if(hasNormal) object->normals.push_back(index.second.second);
-
-                    }
-
-                }
-
-                if(!objState->objects.empty())
-                {
-                    object = std::make_shared<obj_object_t>();
-                    indices.clear();
-
-                }
-
-                if(!(iss >> object->name))
-                {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
-                    break;
-
-                }
-
-                objState->objects.push_back(object);
-                std::cout << "Object: " << object->name << std::endl;
-
-            }*/
+            }
             else if(entryType == "usemtl")
             {
                 if(!(iss >> objState->materialName))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
@@ -729,12 +1060,11 @@ int main(int argc, char *argv[])
 
                 if(!foundMaterial)
                 {
-                    std::cout << "Material not found: " << objState->materialName << std::endl;
+					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Could not find material '" << objState->materialName << "'" << std::endl;
                     break;
 
                 }
 
-                std::cout << "Material Name: " << objState->materialName << ", ID: " << objState->materialId << ", assigned to group " << group->name << std::endl;
                 group->materialName = objState->materialName;
                 group->materialId = objState->materialId;
 
@@ -744,27 +1074,221 @@ int main(int argc, char *argv[])
                 std::string smoothing;
                 if(!(iss >> smoothing))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
 
-                if(smoothing == "off") group->smoothing = 0;
-                else if(smoothing == "on") group->smoothing = 1;
-                else group->smoothing = std::stoi(smoothing);
+                if(smoothing == "off") objState->smoothing = 0;
+                else if(smoothing == "on") objState->smoothing = 1;
+                else objState->smoothing = std::stoi(smoothing);
 
-                std::cout << "Smoothing: " << static_cast<unsigned>(group->smoothing) << std::endl;
+				group->smoothing = objState->smoothing;
 
             }
             else if(entryType == "f")
             {
                 struct obj_index_t
                 {
-                    std::uint16_t a, b, c, d;
+                    int a = 0, b = 0, c = 0, d = 0;//, e = 0;
 
                 } position, uv, normal;
-                char skip;
+                //char skip;
+				std::smatch matches;
+				
+				// Non-Indexed Geometry
+				auto makeNonIndexedVertices = [&](const auto &positionIndex, const auto &normalIndex, const auto &uvIndex)
+				{
+					if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
+					if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
+					if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
 
+				};
+				
+				// Indexed Geometry
+				auto makeFaceIndex = [&](auto &faceIndex, const auto &positionIndex, const auto &normalIndex, const auto &uvIndex)
+				{
+					auto cacheIndexKey = std::to_string(positionIndex) + "," + std::to_string(normalIndex) + "," + std::to_string(uvIndex);
+					auto cachedIndex = indices.find(cacheIndexKey);
+					if(cachedIndex == indices.end())
+					{
+						indices.insert(std::make_pair(cacheIndexKey, index));
+						faceIndex = index++;
+
+						if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
+						if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
+						if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
+
+					}
+					else
+					{
+						faceIndex = cachedIndex->second;
+
+					}
+
+				};
+				
+				int numFaces = 0;
+
+				if(std::regex_search(line, matches, FACE_POSITION_UV_NORMAL) && matches.size() >= 10)
+				{
+					numFaces = 3;
+
+					position = { std::stoi(matches.str(1)), std::stoi(matches.str(4)), std::stoi(matches.str(7)) };
+					uv = { std::stoi(matches.str(2)), std::stoi(matches.str(5)), std::stoi(matches.str(8)) };
+					normal = { std::stoi(matches.str(3)), std::stoi(matches.str(6)), std::stoi(matches.str(9)) };
+					
+					if(matches.size() >= 13 && !matches.str(10).empty() && !matches.str(11).empty() && !matches.str(12).empty())
+					{
+						position.d = std::stoi(matches.str(10));
+						uv.d = std::stoi(matches.str(11));
+						normal.d = std::stoi(matches.str(12));
+						++numFaces;
+
+					}
+
+					if(matches.size() >= 16 && !matches.str(13).empty() && !matches.str(14).empty() && !matches.str(15).empty()) ++numFaces;
+
+				}
+				else if(std::regex_search(line, matches, FACE_POSITION_UV) && matches.size() >= 7)
+				{
+					numFaces = 3;
+
+					position = { std::stoi(matches.str(1)), std::stoi(matches.str(3)), std::stoi(matches.str(5)) };
+					uv = { std::stoi(matches.str(2)), std::stoi(matches.str(4)), std::stoi(matches.str(6)) };
+					
+					if(matches.size() >= 9 && !matches.str(7).empty() && !matches.str(8).empty())
+					{
+						position.d = std::stoi(matches.str(7));
+						uv.d = std::stoi(matches.str(8));
+						++numFaces;
+
+					}
+
+					if(matches.size() >= 11 && !matches.str(9).empty() && !matches.str(10).empty()) ++numFaces;
+
+				}
+				else if(std::regex_search(line, matches, FACE_POSITION_NORMAL) && matches.size() >= 7)
+				{
+					numFaces = 3;
+
+					position = { std::stoi(matches.str(1)), std::stoi(matches.str(3)), std::stoi(matches.str(5)) };
+					normal = { std::stoi(matches.str(2)), std::stoi(matches.str(4)), std::stoi(matches.str(6)) };
+					
+					if(matches.size() >= 9 &&!matches.str(7).empty() && !matches.str(8).empty())
+					{
+						position.d = std::stoi(matches.str(7));
+						normal.d = std::stoi(matches.str(8));
+						++numFaces;
+
+					}
+
+					if(matches.size() >= 11 && !matches.str(9).empty() && !matches.str(10).empty()) ++numFaces;
+
+				}
+				else if(std::regex_search(line, matches, FACE_POSITION) && matches.size() >= 4)
+				{
+					numFaces = 3;
+
+					position = { std::stoi(matches.str(1)), std::stoi(matches.str(2)), std::stoi(matches.str(3)) };
+					
+					if(matches.size() >= 5 && !matches.str(4).empty())
+					{
+						position.d = std::stoi(matches.str(4));
+						++numFaces;
+
+					}
+
+					if(matches.size() >= 6 && !matches.str(5).empty()) ++numFaces;
+
+				}
+				
+				if(numFaces == 3)
+				{
+					// Triangles
+					if(createIndexedGeometry)
+					{
+						// Indexed Geometry
+						obj_face3_t face;
+						makeFaceIndex(face.a, position.a, normal.a, uv.a);
+						makeFaceIndex(face.b, position.b, normal.b, uv.b);
+						makeFaceIndex(face.c, position.c, normal.c, uv.c);
+						group->faces.push_back(face);
+
+					}
+					else
+					{
+						// Non-Indexed Geometry
+						makeNonIndexedVertices(position.a, normal.a, uv.a);
+						makeNonIndexedVertices(position.b, normal.b, uv.b);
+						makeNonIndexedVertices(position.c, normal.c, uv.c);
+
+					}
+
+				}
+				else if(numFaces == 4)
+				{
+					// Quads
+					if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Quad geometry faces are automatically triangulated." << std::endl;
+					/*
+					double dist1 = x.Vertices[mf.A].DistanceTo(x.Vertices[mf.C]);
+					double dist2 = x.Vertices[mf.B].DistanceTo(x.Vertices[mf.D]);
+					
+					if(dist1 > dist2)
+					{
+						x.Faces.AddFace(mf.A, mf.B, mf.D);
+						x.Faces.AddFace(mf.B, mf.C, mf.D);
+					}
+					else
+					{
+						x.Faces.AddFace(mf.A, mf.B, mf.C);
+						x.Faces.AddFace(mf.A, mf.C, mf.D);
+					}*/
+
+					// Triangulate Quad Face
+					if(createIndexedGeometry)
+					{
+						// Indexed Geometry
+						obj_face3_t face;
+						makeFaceIndex(face.a, position.a, normal.a, uv.a);
+						makeFaceIndex(face.b, position.b, normal.b, uv.b);
+						makeFaceIndex(face.c, position.c, normal.c, uv.c);
+						group->faces.push_back(face);
+
+						makeFaceIndex(face.a, position.a, normal.a, uv.a);
+						makeFaceIndex(face.b, position.c, normal.c, uv.c);
+						makeFaceIndex(face.c, position.d, normal.d, uv.d);
+						group->faces.push_back(face);
+
+					}
+					else
+					{
+						// Non-Indexed Geometry
+						makeNonIndexedVertices(position.a, normal.a, uv.a);
+						makeNonIndexedVertices(position.b, normal.b, uv.b);
+						makeNonIndexedVertices(position.c, normal.c, uv.c);
+
+						makeNonIndexedVertices(position.a, normal.a, uv.a);
+						makeNonIndexedVertices(position.c, normal.c, uv.c);
+						makeNonIndexedVertices(position.d, normal.d, uv.d);
+
+					}
+
+				}
+				else if(numFaces > 4)
+				{
+					// N-gons
+					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] N-gon geometry faces are not supported." << std::endl;
+                    break;
+
+				}
+				else
+				{
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+                    break;
+
+				}
+/*
                 // Format Assumption
                 // position/uv/normal position/uv/normal position/uv/normal [position/uv/normal]
                 if(!(iss >>
@@ -772,27 +1296,71 @@ int main(int argc, char *argv[])
                      position.b >> skip >> uv.b >> skip >> normal.b >>
                      position.c >> skip >> uv.c >> skip >> normal.c))
                 {
-                    std::cout << "Syntax error while parsing entry type: " << entryType << std::endl;
+                    if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
                     break;
 
                 }
-                else if(iss >> skip >> position.d >> skip >> uv.d >> skip >> normal.d)
+                else if(iss >> position.d >> skip >> uv.d >> skip >> normal.d)
                 {
-                    std::cout << "Quad geometry faces are not supported." << std::endl;
+					if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Quad geometry faces are automatically triangulated." << std::endl;
+
+					// Triangulate Quad Face
+					if(createIndexedGeometry)
+					{
+						// Indexed Geometry
+						obj_face3_t face;
+						makeFaceIndex(face.a, position.a, normal.a, uv.a);
+						makeFaceIndex(face.b, position.b, normal.b, uv.b);
+						makeFaceIndex(face.c, position.d, normal.d, uv.d);
+						group->faces.push_back(face);
+
+						makeFaceIndex(face.a, position.b, normal.b, uv.b);
+						makeFaceIndex(face.b, position.c, normal.c, uv.c);
+						makeFaceIndex(face.c, position.d, normal.d, uv.d);
+						group->faces.push_back(face);
+
+					}
+					else
+					{
+						// Non-Indexed Geometry
+						makeNonIndexedVertices(position.a, normal.a, uv.a);
+						makeNonIndexedVertices(position.b, normal.b, uv.b);
+						makeNonIndexedVertices(position.d, normal.d, uv.d);
+
+						makeNonIndexedVertices(position.b, normal.b, uv.b);
+						makeNonIndexedVertices(position.c, normal.c, uv.c);
+						makeNonIndexedVertices(position.d, normal.d, uv.d);
+
+					}
+					
+					continue;
+
+                }
+                else if(iss >> skip >> position.e >> skip >> uv.e >> skip >> normal.e)
+                {
+					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] N-gon geometry faces are not supported." << std::endl;
                     break;
 
                 }
-/*
-                std::cout << position.a << "/" << uv.a << "/" << normal.a << " " <<
-                     position.b << "/" << uv.b << "/" << normal.b << " " <<
-                     position.c << "/" << uv.c << "/" << normal.c << std::endl;
-*/
-                bool hasUV = !object->uvs.empty(), hasNormal = !object->normals.empty();
-                indices[--position.a] = std::make_pair(hasUV ? object->uvs[--uv.a] : obj_vector2_t{}, hasNormal ? object->normals[--normal.a] : obj_vector3_t{});
-                indices[--position.b] = std::make_pair(hasUV ? object->uvs[--uv.b] : obj_vector2_t{}, hasNormal ? object->normals[--normal.b] : obj_vector3_t{});
-                indices[--position.c] = std::make_pair(hasUV ? object->uvs[--uv.c] : obj_vector2_t{}, hasNormal ? object->normals[--normal.c] : obj_vector3_t{});
 
-                group->faces.push_back({ position.a, position.b, position.c });
+				if(createIndexedGeometry)
+				{
+					// Indexed Geometry
+					obj_face3_t face;
+					makeFaceIndex(face.a, position.a, normal.a, uv.a);
+					makeFaceIndex(face.b, position.b, normal.b, uv.b);
+					makeFaceIndex(face.c, position.c, normal.c, uv.c);
+					group->faces.push_back(face);
+
+				}
+				else
+				{
+					// Non-Indexed Geometry
+					makeNonIndexedVertices(position.a, normal.a, uv.a);
+					makeNonIndexedVertices(position.b, normal.b, uv.b);
+					makeNonIndexedVertices(position.c, normal.c, uv.c);
+
+				}*/
 
             }
             else if(entryType == "#")
@@ -802,7 +1370,7 @@ int main(int argc, char *argv[])
             }
             else if(entryType == "p" || entryType == "l" || entryType == "curv" || entryType == "curv2" || entryType == "surf")
             {
-                std::cout << "Geometry type '" << entryType << "' is not supported." << std::endl;
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Geometry type '" << entryType << "' is not supported." << std::endl;
                 break;
 
             }
@@ -812,34 +1380,14 @@ int main(int argc, char *argv[])
 
             }
 
-            lastEntryType = entryType;
-
         }
-
-        bool hasUV = !object->uvs.empty(), hasNormal = !object->normals.empty();
-        if(hasUV || hasNormal)
-        {
-            object->uvs.clear();
-            object->normals.clear();
-
-            for(auto &index : indices)
-            {
-                if(hasUV) object->uvs.push_back(index.second.first);
-                if(hasNormal) object->normals.push_back(index.second.second);
-
-            }
-
-            std::cout << object->positions.size() << " " << object->uvs.size() << " " << object->normals.size() << std::endl;
-
-        }
-
-        std::cout << objState->objects.size() << std::endl;
-        for(auto &object : objState->objects) for(auto &group : object->groups) std::cout << group << std::endl;
 
         if(isFirstGroup) object->groups.push_back(group);
         if(isFirstObject) objState->objects.push_back(object);
 
         objFile.close();
+		
+		++maxContainerId;
 
     }
 
