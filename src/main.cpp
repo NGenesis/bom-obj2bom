@@ -21,6 +21,16 @@ static const std::uint8_t BOM_DATA_VERSION = 1;
 
 typedef std::uint16_t obj_index_t;
 
+// Vendor-specific Material Property
+enum class FaceCulling : std::uint8_t
+{
+	NONE = 0,
+	FRONT = 1,
+	BACK = 2,
+	ALL = 3,
+
+};
+
 // BOM
 enum class FileDataAttribute : std::uint16_t
 {
@@ -73,7 +83,8 @@ enum class MaterialDataAttribute : std::uint32_t
 	EMISSIVE_MAP = 1 << 13,
 	DISSOLVE_MAP = 1 << 14,
 	BUMP_MAP = 1 << 15,
-	DISPLACEMENT_MAP = 1 << 16
+	DISPLACEMENT_MAP = 1 << 16,
+	FACE_CULLING = 1 << 17
 
 };
 
@@ -136,6 +147,7 @@ struct mtl_material_t
 	float specularExponent, opticalDensity, dissolve;
 	mtl_color_t transmissionFilter, ambientReflectance, diffuseReflectance, specularReflectance, emissiveReflectance;
 	mtl_map_t ambientMap, diffuseMap, specularMap, emissiveMap, dissolveMap, bumpMap, displacementMap;
+	FaceCulling faceCulling;
 
 };
 
@@ -442,6 +454,9 @@ bool WriteBOM(const std::string &bomFilePath)
 
 				}
 
+				// Face Culling (cull_face)
+				if(materialAttributes & BitmaskFlag(MaterialDataAttribute::FACE_CULLING)) bomFile.write(reinterpret_cast<char*>(&material.second->faceCulling), sizeof(material.second->faceCulling));
+
 			}
 
 		}
@@ -593,7 +608,71 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 
 		}
 
-		if(entryType == "newmtl")
+		if(entryType == "#")
+		{
+			// Attempt to parse out vendor-specific material property
+			// # :[vendor]: [property] [value0] [value1] [valueN...]
+			if((iss >> entryType) && entryType == ":BOM:")
+			{
+				if(!(iss >> entryType))
+				{
+					if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Vendor-specific material entry type could not be parsed and will be skipped." << std::endl;
+					continue;
+
+				}
+
+				if(entryType == "cull_face")
+				{
+					// Face Culling Preference (cull_face)
+					// cull_face [none|front|back|all]
+					// none (0x00): No face culling is applied.
+					// front (0x01): Front faces are culled.
+					// back (0x02): Back faces are culled.
+					// all (0x03): Both front and back faces are culled.
+					std::string faceCulling;
+					if(!(iss >> faceCulling))
+					{
+						if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Vendor-specific entry type '" << entryType << "' could not be parsed and will be skipped." << std::endl;
+						continue;
+
+					}
+					else if(faceCulling == "none")
+					{
+						material->faceCulling = FaceCulling::NONE;
+
+					}
+					else if(faceCulling == "front")
+					{
+						material->faceCulling = FaceCulling::FRONT;
+
+					}
+					else if(faceCulling == "back")
+					{
+						material->faceCulling = FaceCulling::BACK;
+
+					}
+					else if(faceCulling == "all")
+					{
+						material->faceCulling = FaceCulling::ALL;
+
+					}
+					else
+					{
+						if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Vendor-specific entry type '" << entryType << "' has unsupported value will be skipped." << std::endl;
+						continue;
+
+					}
+
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::FACE_CULLING);
+
+				}
+
+			}
+
+			continue;
+
+		}
+		else if(entryType == "newmtl")
 		{
 			if(!mtlState->materials.empty())
 			{
@@ -610,7 +689,6 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 			}
 
 			mtlState->materials.insert(std::make_pair(material->id, material));
-			//std::cout << "Material: " << material->name << std::endl;
 
 		}
 		else if(entryType == "illum")
@@ -837,11 +915,6 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 
 			material->displacementMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
 			material->attributes |= BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP);
-
-		}
-		else if(entryType == "#")
-		{
-			continue;
 
 		}
 		else
@@ -1089,10 +1162,9 @@ int main(int argc, char *argv[])
 			{
 				struct obj_index_t
 				{
-					int a = 0, b = 0, c = 0, d = 0;//, e = 0;
+					int a = 0, b = 0, c = 0, d = 0;
 
 				} position, uv, normal;
-				//char skip;
 				std::smatch matches;
 				
 				// Non-Indexed Geometry
@@ -1229,20 +1301,6 @@ int main(int argc, char *argv[])
 				{
 					// Quads
 					if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Quad geometry faces are automatically triangulated." << std::endl;
-					/*
-					double dist1 = x.Vertices[mf.A].DistanceTo(x.Vertices[mf.C]);
-					double dist2 = x.Vertices[mf.B].DistanceTo(x.Vertices[mf.D]);
-					
-					if(dist1 > dist2)
-					{
-						x.Faces.AddFace(mf.A, mf.B, mf.D);
-						x.Faces.AddFace(mf.B, mf.C, mf.D);
-					}
-					else
-					{
-						x.Faces.AddFace(mf.A, mf.B, mf.C);
-						x.Faces.AddFace(mf.A, mf.C, mf.D);
-					}*/
 
 					// Triangulate Quad Face
 					if(createIndexedGeometry)
@@ -1287,79 +1345,6 @@ int main(int argc, char *argv[])
 					break;
 
 				}
-/*
-				// Format Assumption
-				// position/uv/normal position/uv/normal position/uv/normal [position/uv/normal]
-				if(!(iss >>
-					 position.a >> skip >> uv.a >> skip >> normal.a >>
-					 position.b >> skip >> uv.b >> skip >> normal.b >>
-					 position.c >> skip >> uv.c >> skip >> normal.c))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-				else if(iss >> position.d >> skip >> uv.d >> skip >> normal.d)
-				{
-					if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Quad geometry faces are automatically triangulated." << std::endl;
-
-					// Triangulate Quad Face
-					if(createIndexedGeometry)
-					{
-						// Indexed Geometry
-						obj_face3_t face;
-						makeFaceIndex(face.a, position.a, normal.a, uv.a);
-						makeFaceIndex(face.b, position.b, normal.b, uv.b);
-						makeFaceIndex(face.c, position.d, normal.d, uv.d);
-						group->faces.push_back(face);
-
-						makeFaceIndex(face.a, position.b, normal.b, uv.b);
-						makeFaceIndex(face.b, position.c, normal.c, uv.c);
-						makeFaceIndex(face.c, position.d, normal.d, uv.d);
-						group->faces.push_back(face);
-
-					}
-					else
-					{
-						// Non-Indexed Geometry
-						makeNonIndexedVertices(position.a, normal.a, uv.a);
-						makeNonIndexedVertices(position.b, normal.b, uv.b);
-						makeNonIndexedVertices(position.d, normal.d, uv.d);
-
-						makeNonIndexedVertices(position.b, normal.b, uv.b);
-						makeNonIndexedVertices(position.c, normal.c, uv.c);
-						makeNonIndexedVertices(position.d, normal.d, uv.d);
-
-					}
-					
-					continue;
-
-				}
-				else if(iss >> skip >> position.e >> skip >> uv.e >> skip >> normal.e)
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] N-gon geometry faces are not supported." << std::endl;
-					break;
-
-				}
-
-				if(createIndexedGeometry)
-				{
-					// Indexed Geometry
-					obj_face3_t face;
-					makeFaceIndex(face.a, position.a, normal.a, uv.a);
-					makeFaceIndex(face.b, position.b, normal.b, uv.b);
-					makeFaceIndex(face.c, position.c, normal.c, uv.c);
-					group->faces.push_back(face);
-
-				}
-				else
-				{
-					// Non-Indexed Geometry
-					makeNonIndexedVertices(position.a, normal.a, uv.a);
-					makeNonIndexedVertices(position.b, normal.b, uv.b);
-					makeNonIndexedVertices(position.c, normal.c, uv.c);
-
-				}*/
 
 			}
 			else if(entryType == "#")
@@ -1375,7 +1360,7 @@ int main(int argc, char *argv[])
 			}
 			else
 			{
-				std::cout << entryType << std::endl;
+				if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Skipping unsupported entry type '" << entryType << "'" << std::endl;
 
 			}
 
