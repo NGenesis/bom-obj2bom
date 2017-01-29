@@ -39,6 +39,13 @@ enum class FileDataAttribute : std::uint16_t
 
 };
 
+enum class AssetDataAttribute : std::uint16_t
+{
+	NONE = 1 << 0,
+	NAME = 1 << 1
+
+};
+
 enum class GroupDataAttribute : std::uint16_t
 {
 	NONE = 1 << 0,
@@ -52,8 +59,7 @@ enum class GroupDataAttribute : std::uint16_t
 enum class ObjectDataAttribute : std::uint16_t
 {
 	NONE = 1 << 0,
-	NAME = 1 << 1,
-	GEOMETRY = 1 << 2
+	GEOMETRY = 1 << 1
 
 };
 
@@ -170,8 +176,6 @@ struct obj_group_t
 
 struct obj_object_t
 {
-	std::uint32_t containerId;
-	std::string name;
 	std::vector<obj_vector3_t> positions;
 	std::vector<obj_vector3_t> normals;
 	std::vector<obj_vector2_t> uvs;
@@ -189,7 +193,14 @@ struct obj_state_t
 
 };
 
-std::vector<std::shared_ptr<obj_state_t>> objStates;
+struct bom_asset_t
+{
+	std::string name;
+	std::vector<std::shared_ptr<obj_state_t>> objStates;
+
+};
+
+//std::vector<std::shared_ptr<obj_state_t>> objStates;
 std::vector<std::shared_ptr<mtl_state_t>> mtlStates;
 std::uint16_t maxMaterialId = 0;
 
@@ -197,7 +208,7 @@ bool createIndexedGeometry = true;
 bool logWarnings = true;
 bool logErrors = true;
 
-bool WriteBOM(const std::string &bomFilePath)
+bool WriteBOM(const std::vector<std::shared_ptr<bom_asset_t>> &assets, const std::string &bomFilePath)
 {
 	std::cout << "Writing BOM '" << bomFilePath << "'..." << std::endl;
 
@@ -463,101 +474,110 @@ bool WriteBOM(const std::string &bomFilePath)
 
 	}
 
-	// Object Count
-	std::uint16_t objectCount = 0;
-	for(const auto &objState : objStates) objectCount += objState->objects.size();
-	bomFile.write(reinterpret_cast<char*>(&objectCount), sizeof(objectCount));
+	// Asset Count
+	std::uint16_t assetCount = assets.size();
+	bomFile.write(reinterpret_cast<char*>(&assetCount), sizeof(assetCount));
 
-	for(const auto &objState : objStates)
+	for(const auto &asset : assets)
 	{
-		for(const auto &object : objState->objects)
+		// Asset Data Attributes
+		auto assetAttributes = BitmaskFlag(AssetDataAttribute::NONE);
+		if(!asset->name.empty()) assetAttributes |= BitmaskFlag(AssetDataAttribute::NAME);
+		bomFile.write(reinterpret_cast<char*>(&assetAttributes), sizeof(assetAttributes));
+
+		// Asset Name
+		if(assetAttributes & BitmaskFlag(AssetDataAttribute::NAME))
 		{
-			// Object Data Attributes
-			auto objectAttributes = BitmaskFlag(ObjectDataAttribute::NONE);
-			if(!object->name.empty()) objectAttributes |= BitmaskFlag(ObjectDataAttribute::NAME);
-			if(!object->positions.empty()) objectAttributes |= BitmaskFlag(ObjectDataAttribute::GEOMETRY);
-			bomFile.write(reinterpret_cast<char*>(&objectAttributes), sizeof(objectAttributes));
-			
-			// Container ID
-			bomFile.write(reinterpret_cast<char*>(&object->containerId), sizeof(object->containerId));
+			std::uint16_t assetNameLength = asset->name.size();
+			bomFile.write(reinterpret_cast<char*>(&assetNameLength), sizeof(assetNameLength));
+			bomFile.write(asset->name.c_str(), assetNameLength);
 
-			// Object Name
-			if(objectAttributes & BitmaskFlag(ObjectDataAttribute::NAME))
+		}
+
+		// Object Count
+		std::uint16_t objectCount = 0;
+		for(const auto &objState : asset->objStates) objectCount += objState->objects.size();
+		bomFile.write(reinterpret_cast<char*>(&objectCount), sizeof(objectCount));
+
+		for(const auto &objState : asset->objStates)
+		{
+			for(const auto &object : objState->objects)
 			{
-				std::uint16_t objectNameLength = object->name.size();
-				bomFile.write(reinterpret_cast<char*>(&objectNameLength), sizeof(objectNameLength));
-				bomFile.write(object->name.c_str(), objectNameLength);
-
-			}
-
-			if(objectAttributes & BitmaskFlag(ObjectDataAttribute::GEOMETRY))
-			{
-				// Geometry Data Attributes
-				auto geometryAttributes = BitmaskFlag(GeometryDataAttribute::NONE);
-				if(!object->normals.empty()) geometryAttributes |= BitmaskFlag(GeometryDataAttribute::NORMAL);
-				if(!object->uvs.empty()) geometryAttributes |= BitmaskFlag(GeometryDataAttribute::UV);
-				bomFile.write(reinterpret_cast<char*>(&geometryAttributes), sizeof(geometryAttributes));
-
-				// Vertex Count
-				std::uint32_t vertexCount = object->positions.size();
-				bomFile.write(reinterpret_cast<char*>(&vertexCount), sizeof(vertexCount));
-
-				// Vertex Positions
-				bomFile.write(reinterpret_cast<char*>(object->positions.data()), sizeof(float) * vertexCount * 3);
-
-				// Vertex Normals
-				if(geometryAttributes & BitmaskFlag(GeometryDataAttribute::NORMAL)) bomFile.write(reinterpret_cast<char*>(object->normals.data()), sizeof(float) * vertexCount * 3);
-
-				// Vertex UVs
-				if(geometryAttributes & BitmaskFlag(GeometryDataAttribute::UV)) bomFile.write(reinterpret_cast<char*>(object->uvs.data()), sizeof(float) * vertexCount * 2);
-
-			}
-
-			// Group Count
-			std::uint16_t groupCount = object->groups.size();
-			bomFile.write(reinterpret_cast<char*>(&groupCount), sizeof(groupCount));
-
-			for(const auto &group : object->groups)
-			{
-				// Group Data Attributes
-				auto groupAttributes = BitmaskFlag(GroupDataAttribute::NONE);
-				if(!group->name.empty()) groupAttributes |= BitmaskFlag(GroupDataAttribute::NAME);
-				if(!group->faces.empty()) groupAttributes |= BitmaskFlag(GroupDataAttribute::INDEX);
-				if(group->smoothing >= 0) groupAttributes |= BitmaskFlag(GroupDataAttribute::SMOOTHING);
-				if(!group->materialName.empty() && objState->mtlState && objState->mtlState->materials.find(group->materialId) != objState->mtlState->materials.end()) groupAttributes |= BitmaskFlag(GroupDataAttribute::MATERIAL);
-				bomFile.write(reinterpret_cast<char*>(&groupAttributes), sizeof(groupAttributes));
-
-				// Group Name
-				if(groupAttributes & BitmaskFlag(GroupDataAttribute::NAME))
-				{
-					std::uint16_t groupNameLength = group->name.size();
-					bomFile.write(reinterpret_cast<char*>(&groupNameLength), sizeof(groupNameLength));
-					bomFile.write(group->name.c_str(), groupNameLength);
-
-				}
+				// Object Data Attributes
+				auto objectAttributes = BitmaskFlag(ObjectDataAttribute::NONE);
+				if(!object->positions.empty()) objectAttributes |= BitmaskFlag(ObjectDataAttribute::GEOMETRY);
+				bomFile.write(reinterpret_cast<char*>(&objectAttributes), sizeof(objectAttributes));
 
 				if(objectAttributes & BitmaskFlag(ObjectDataAttribute::GEOMETRY))
 				{
-					// Indices
-					if(groupAttributes & BitmaskFlag(GroupDataAttribute::INDEX))
-					{
-						// Index Count
-						std::uint32_t indexCount = group->faces.size() * 3;
-						bomFile.write(reinterpret_cast<char*>(&indexCount), sizeof(indexCount));
+					// Geometry Data Attributes
+					auto geometryAttributes = BitmaskFlag(GeometryDataAttribute::NONE);
+					if(!object->normals.empty()) geometryAttributes |= BitmaskFlag(GeometryDataAttribute::NORMAL);
+					if(!object->uvs.empty()) geometryAttributes |= BitmaskFlag(GeometryDataAttribute::UV);
+					bomFile.write(reinterpret_cast<char*>(&geometryAttributes), sizeof(geometryAttributes));
 
-						// Indices
-						bomFile.write(reinterpret_cast<char*>(group->faces.data()), sizeof(obj_index_t) * indexCount);
+					// Vertex Count
+					std::uint32_t vertexCount = object->positions.size();
+					bomFile.write(reinterpret_cast<char*>(&vertexCount), sizeof(vertexCount));
+
+					// Vertex Positions
+					bomFile.write(reinterpret_cast<char*>(object->positions.data()), sizeof(float) * vertexCount * 3);
+
+					// Vertex Normals
+					if(geometryAttributes & BitmaskFlag(GeometryDataAttribute::NORMAL)) bomFile.write(reinterpret_cast<char*>(object->normals.data()), sizeof(float) * vertexCount * 3);
+
+					// Vertex UVs
+					if(geometryAttributes & BitmaskFlag(GeometryDataAttribute::UV)) bomFile.write(reinterpret_cast<char*>(object->uvs.data()), sizeof(float) * vertexCount * 2);
+
+				}
+
+				// Group Count
+				std::uint16_t groupCount = object->groups.size();
+				bomFile.write(reinterpret_cast<char*>(&groupCount), sizeof(groupCount));
+
+				for(const auto &group : object->groups)
+				{
+					// Group Data Attributes
+					auto groupAttributes = BitmaskFlag(GroupDataAttribute::NONE);
+					if(!group->name.empty()) groupAttributes |= BitmaskFlag(GroupDataAttribute::NAME);
+					if(!group->faces.empty()) groupAttributes |= BitmaskFlag(GroupDataAttribute::INDEX);
+					if(group->smoothing >= 0) groupAttributes |= BitmaskFlag(GroupDataAttribute::SMOOTHING);
+					if(!group->materialName.empty() && objState->mtlState && objState->mtlState->materials.find(group->materialId) != objState->mtlState->materials.end()) groupAttributes |= BitmaskFlag(GroupDataAttribute::MATERIAL);
+					bomFile.write(reinterpret_cast<char*>(&groupAttributes), sizeof(groupAttributes));
+
+					// Group Name
+					if(groupAttributes & BitmaskFlag(GroupDataAttribute::NAME))
+					{
+						std::uint16_t groupNameLength = group->name.size();
+						bomFile.write(reinterpret_cast<char*>(&groupNameLength), sizeof(groupNameLength));
+						bomFile.write(group->name.c_str(), groupNameLength);
 
 					}
 
-					// Smoothing
-					if(groupAttributes & BitmaskFlag(GroupDataAttribute::SMOOTHING)) bomFile.write(reinterpret_cast<char*>(&group->smoothing), sizeof(group->smoothing));
-
-					if(groupAttributes & BitmaskFlag(GroupDataAttribute::MATERIAL))
+					if(objectAttributes & BitmaskFlag(ObjectDataAttribute::GEOMETRY))
 					{
-						// Material ID
-						std::uint16_t materialId = objState->mtlState->materials[group->materialId]->id;
-						bomFile.write(reinterpret_cast<char*>(&materialId), sizeof(materialId));
+						// Indices
+						if(groupAttributes & BitmaskFlag(GroupDataAttribute::INDEX))
+						{
+							// Index Count
+							std::uint32_t indexCount = group->faces.size() * 3;
+							bomFile.write(reinterpret_cast<char*>(&indexCount), sizeof(indexCount));
+
+							// Indices
+							bomFile.write(reinterpret_cast<char*>(group->faces.data()), sizeof(obj_index_t) * indexCount);
+
+						}
+
+						// Smoothing
+						if(groupAttributes & BitmaskFlag(GroupDataAttribute::SMOOTHING)) bomFile.write(reinterpret_cast<char*>(&group->smoothing), sizeof(group->smoothing));
+
+						if(groupAttributes & BitmaskFlag(GroupDataAttribute::MATERIAL))
+						{
+							// Material ID
+							std::uint16_t materialId = objState->mtlState->materials[group->materialId]->id;
+							bomFile.write(reinterpret_cast<char*>(&materialId), sizeof(materialId));
+
+						}
 
 					}
 
@@ -934,16 +954,410 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 }
 
 // f position.a/uv.a/normal.a position.b/uv.b/normal.b position.c/uv.c/normal.c [position.d/uv.d/normal.d] [position.n/uv.n/normal.n]
-std::regex FACE_POSITION_UV_NORMAL { R"(^f\s+(-?\d+)\/(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\/(-?\d+)(?:\s+(-?\d+)\/(-?\d+)\/(-?\d+))?(?:\s+(-?\d+)\/(-?\d+)\/(-?\d+))?)" };
+static const std::regex FACE_POSITION_UV_NORMAL { R"(^f\s+(-?\d+)\/(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\/(-?\d+)(?:\s+(-?\d+)\/(-?\d+)\/(-?\d+))?(?:\s+(-?\d+)\/(-?\d+)\/(-?\d+))?)" };
 
 // f position.a position.b position.c [position.d] [position.n]
-std::regex FACE_POSITION { R"(^f\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+(-?\d+))?(?:\s+(-?\d+))?)" };
+static const std::regex FACE_POSITION { R"(^f\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+(-?\d+))?(?:\s+(-?\d+))?)" };
 
 // f position.a/uv.a position.b/uv.b position.c/uv.c [position.d/uv.d] [position.n/uv.n]
-std::regex FACE_POSITION_UV { R"(^f\s+(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)(?:\s+(-?\d+)\/(-?\d+))?(?:\s+(-?\d+)\/(-?\d+))?)" };
+static const std::regex FACE_POSITION_UV { R"(^f\s+(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)\s+(-?\d+)\/(-?\d+)(?:\s+(-?\d+)\/(-?\d+))?(?:\s+(-?\d+)\/(-?\d+))?)" };
 
 // f position.a//normal.a position.b//normal.b position.c//normal.c [position.d//normal.d] [position.n//normal.n]
-std::regex FACE_POSITION_NORMAL { R"(^f\s+(-?\d+)\/\/(-?\d+)\s+(-?\d+)\/\/(-?\d+)\s+(-?\d+)\/\/(-?\d+)(?:\s+(-?\d+)\/\/(-?\d+))?(?:\s+(-?\d+)\/\/(-?\d+))?)" };
+static const std::regex FACE_POSITION_NORMAL { R"(^f\s+(-?\d+)\/\/(-?\d+)\s+(-?\d+)\/\/(-?\d+)\s+(-?\d+)\/\/(-?\d+)(?:\s+(-?\d+)\/\/(-?\d+))?(?:\s+(-?\d+)\/\/(-?\d+))?)" };
+
+bool ReadOBJ(std::shared_ptr<bom_asset_t> asset, const std::string &objFilePath)
+{
+	std::ifstream objFile(objFilePath);
+	if(!objFile.is_open()) return false;
+	std::string line;
+	int lineNo = 0;
+
+	std::map<std::string, obj_index_t> indices;
+	std::vector<obj_vector3_t> positions, normals;
+	std::vector<obj_vector2_t> uvs;
+	obj_index_t index = 0;
+
+	bool isFirstObject = true, isFirstGroup = true;
+	std::string relativePath = objFilePath.substr(0, objFilePath.find_last_of("/\\") + 1);
+	std::shared_ptr<obj_object_t> object = std::make_shared<obj_object_t>();
+	auto group = std::make_shared<obj_group_t>();
+
+	auto objState = std::make_shared<obj_state_t>();
+
+	std::cout << "Parsing OBJ '" << objFilePath << "'..." << std::endl;
+	while(std::getline(objFile, line))
+	{
+		++lineNo;
+		std::istringstream iss(line);
+		//std::cout << line << "\n";
+		if(line.empty()) continue;
+
+		std::string entryType;
+		if(!(iss >> entryType))
+		{
+			if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Failed to parse entry type." << std::endl;
+			return false;
+
+		}
+
+		if(entryType == "mtllib")
+		{
+			if(!(iss >> objState->materialFileName))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+			
+			objState->materialFileName = objState->materialFileName.substr(objState->materialFileName.find_last_of("/\\") + 1);
+
+			if(!ReadMTL(relativePath, objState))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Failed to open material file '" << objState->materialFileName << "'" << std::endl;
+				return false;
+
+			}
+
+		}
+		else if(entryType == "v")
+		{
+			obj_vector3_t position;
+			if(!(iss >> position.x >> position.y >> position.z))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+
+			positions.push_back(position);
+
+		}
+		else if(entryType == "vn")
+		{
+			obj_vector3_t normal;
+			if(!(iss >> normal.x >> normal.y >> normal.z))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+
+			normals.push_back(normal);
+
+		}
+		else if(entryType == "vt")
+		{
+			obj_vector2_t uv;
+			float w;
+			if(!(iss >> uv.x >> uv.y))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+			else if((iss >> w) && w > 0.0f)
+			{
+				if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] 3D texture coordinates are not supported, W component has been discarded." << std::endl;
+
+			}
+
+			uvs.push_back(uv);
+
+		}
+		else if(entryType == "g" || entryType == "o")
+		{
+			if(!isFirstGroup) group = std::make_shared<obj_group_t>();
+			if(!isFirstObject) object = std::make_shared<obj_object_t>();
+
+			indices.clear();
+			index = 0;
+
+			if(!(iss >> group->name))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+
+			group->materialName = objState->materialName;
+			group->materialId = objState->materialId;
+			group->smoothing = objState->smoothing;
+
+			object->groups.push_back(group);
+			isFirstGroup = false;
+			
+			objState->objects.push_back(object);
+			isFirstObject = false;
+
+		}
+		else if(entryType == "usemtl")
+		{
+			if(!(iss >> objState->materialName))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+
+			bool foundMaterial = false;
+
+			for(const auto &material : objState->mtlState->materials)
+			{
+				if(material.second->name == objState->materialName)
+				{
+					objState->materialId = material.second->id;
+					foundMaterial = true;
+					break;
+
+				}
+
+			}
+
+			if(!foundMaterial)
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Could not find material '" << objState->materialName << "'" << std::endl;
+				return false;
+
+			}
+
+			group->materialName = objState->materialName;
+			group->materialId = objState->materialId;
+
+		}
+		else if(entryType == "s")
+		{
+			std::string smoothing;
+			if(!(iss >> smoothing))
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+
+			if(smoothing == "off") objState->smoothing = 0;
+			else if(smoothing == "on") objState->smoothing = 1;
+			else objState->smoothing = std::stoi(smoothing);
+
+			group->smoothing = objState->smoothing;
+
+		}
+		else if(entryType == "f")
+		{
+			struct obj_index_t
+			{
+				int a = 0, b = 0, c = 0, d = 0;
+
+			} position, uv, normal;
+			std::smatch matches;
+			
+			// Non-Indexed Geometry
+			auto makeNonIndexedVertices = [&](const auto &positionIndex, const auto &normalIndex, const auto &uvIndex)
+			{
+				if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
+				if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
+				if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
+
+			};
+			
+			// Indexed Geometry
+			auto makeFaceIndex = [&](auto &faceIndex, const auto &positionIndex, const auto &normalIndex, const auto &uvIndex)
+			{
+				auto cacheIndexKey = std::to_string(positionIndex) + "," + std::to_string(normalIndex) + "," + std::to_string(uvIndex);
+				auto cachedIndex = indices.find(cacheIndexKey);
+				if(cachedIndex == indices.end())
+				{
+					indices.insert(std::make_pair(cacheIndexKey, index));
+					faceIndex = index++;
+
+					if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
+					if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
+					if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
+
+				}
+				else
+				{
+					faceIndex = cachedIndex->second;
+
+				}
+
+			};
+			
+			int numFaces = 0;
+
+			if(std::regex_search(line, matches, FACE_POSITION_UV_NORMAL) && matches.size() >= 10)
+			{
+				numFaces = 3;
+
+				position = { std::stoi(matches.str(1)), std::stoi(matches.str(4)), std::stoi(matches.str(7)) };
+				uv = { std::stoi(matches.str(2)), std::stoi(matches.str(5)), std::stoi(matches.str(8)) };
+				normal = { std::stoi(matches.str(3)), std::stoi(matches.str(6)), std::stoi(matches.str(9)) };
+				
+				if(matches.size() >= 13 && !matches.str(10).empty() && !matches.str(11).empty() && !matches.str(12).empty())
+				{
+					position.d = std::stoi(matches.str(10));
+					uv.d = std::stoi(matches.str(11));
+					normal.d = std::stoi(matches.str(12));
+					++numFaces;
+
+				}
+
+				if(matches.size() >= 16 && !matches.str(13).empty() && !matches.str(14).empty() && !matches.str(15).empty()) ++numFaces;
+
+			}
+			else if(std::regex_search(line, matches, FACE_POSITION_UV) && matches.size() >= 7)
+			{
+				numFaces = 3;
+
+				position = { std::stoi(matches.str(1)), std::stoi(matches.str(3)), std::stoi(matches.str(5)) };
+				uv = { std::stoi(matches.str(2)), std::stoi(matches.str(4)), std::stoi(matches.str(6)) };
+				
+				if(matches.size() >= 9 && !matches.str(7).empty() && !matches.str(8).empty())
+				{
+					position.d = std::stoi(matches.str(7));
+					uv.d = std::stoi(matches.str(8));
+					++numFaces;
+
+				}
+
+				if(matches.size() >= 11 && !matches.str(9).empty() && !matches.str(10).empty()) ++numFaces;
+
+			}
+			else if(std::regex_search(line, matches, FACE_POSITION_NORMAL) && matches.size() >= 7)
+			{
+				numFaces = 3;
+
+				position = { std::stoi(matches.str(1)), std::stoi(matches.str(3)), std::stoi(matches.str(5)) };
+				normal = { std::stoi(matches.str(2)), std::stoi(matches.str(4)), std::stoi(matches.str(6)) };
+				
+				if(matches.size() >= 9 &&!matches.str(7).empty() && !matches.str(8).empty())
+				{
+					position.d = std::stoi(matches.str(7));
+					normal.d = std::stoi(matches.str(8));
+					++numFaces;
+
+				}
+
+				if(matches.size() >= 11 && !matches.str(9).empty() && !matches.str(10).empty()) ++numFaces;
+
+			}
+			else if(std::regex_search(line, matches, FACE_POSITION) && matches.size() >= 4)
+			{
+				numFaces = 3;
+
+				position = { std::stoi(matches.str(1)), std::stoi(matches.str(2)), std::stoi(matches.str(3)) };
+				
+				if(matches.size() >= 5 && !matches.str(4).empty())
+				{
+					position.d = std::stoi(matches.str(4));
+					++numFaces;
+
+				}
+
+				if(matches.size() >= 6 && !matches.str(5).empty()) ++numFaces;
+
+			}
+			
+			if(numFaces == 3)
+			{
+				// Triangles
+				if(createIndexedGeometry)
+				{
+					// Indexed Geometry
+					obj_face3_t face;
+					makeFaceIndex(face.a, position.a, normal.a, uv.a);
+					makeFaceIndex(face.b, position.b, normal.b, uv.b);
+					makeFaceIndex(face.c, position.c, normal.c, uv.c);
+					group->faces.push_back(face);
+
+				}
+				else
+				{
+					// Non-Indexed Geometry
+					makeNonIndexedVertices(position.a, normal.a, uv.a);
+					makeNonIndexedVertices(position.b, normal.b, uv.b);
+					makeNonIndexedVertices(position.c, normal.c, uv.c);
+
+				}
+
+			}
+			else if(numFaces == 4)
+			{
+				// Quads
+				if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Quad geometry faces are automatically triangulated." << std::endl;
+
+				// Triangulate Quad Face
+				if(createIndexedGeometry)
+				{
+					// Indexed Geometry
+					obj_face3_t face;
+					makeFaceIndex(face.a, position.a, normal.a, uv.a);
+					makeFaceIndex(face.b, position.b, normal.b, uv.b);
+					makeFaceIndex(face.c, position.c, normal.c, uv.c);
+					group->faces.push_back(face);
+
+					makeFaceIndex(face.a, position.a, normal.a, uv.a);
+					makeFaceIndex(face.b, position.c, normal.c, uv.c);
+					makeFaceIndex(face.c, position.d, normal.d, uv.d);
+					group->faces.push_back(face);
+
+				}
+				else
+				{
+					// Non-Indexed Geometry
+					makeNonIndexedVertices(position.a, normal.a, uv.a);
+					makeNonIndexedVertices(position.b, normal.b, uv.b);
+					makeNonIndexedVertices(position.c, normal.c, uv.c);
+
+					makeNonIndexedVertices(position.a, normal.a, uv.a);
+					makeNonIndexedVertices(position.c, normal.c, uv.c);
+					makeNonIndexedVertices(position.d, normal.d, uv.d);
+
+				}
+
+			}
+			else if(numFaces > 4)
+			{
+				// N-gons
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] N-gon geometry faces are not supported." << std::endl;
+				return false;
+
+			}
+			else
+			{
+				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+				return false;
+
+			}
+
+		}
+		else if(entryType == "#")
+		{
+			continue;
+
+		}
+		else if(entryType == "p" || entryType == "l" || entryType == "curv" || entryType == "curv2" || entryType == "surf")
+		{
+			if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Geometry type '" << entryType << "' is not supported." << std::endl;
+			return false;
+
+		}
+		else
+		{
+			if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Skipping unsupported entry type '" << entryType << "'" << std::endl;
+
+		}
+
+	}
+
+	if(isFirstGroup) object->groups.push_back(group);
+	if(isFirstObject) objState->objects.push_back(object);
+
+	objFile.close();
+
+	asset->objStates.push_back(objState);
+	return true;
+
+}
 
 int main(int argc, char *argv[])
 {
@@ -966,416 +1380,20 @@ int main(int argc, char *argv[])
 
 	}
 
-	std::uint32_t maxContainerId = 0;
+	std::vector<std::shared_ptr<bom_asset_t>> assets;
 
-	// OBJ Reader
 	for(const auto &objFilePath : objFilePaths)
 	{
-		bool isFirstObject = true, isFirstGroup = true;
-		std::string objectName = objFilePath.substr(objFilePath.find_last_of("/\\") + 1);
-		std::string relativePath = objFilePath.substr(0, objFilePath.find_last_of("/\\") + 1);
-		std::shared_ptr<obj_object_t> object = std::make_shared<obj_object_t>();
-		object->name = objectName;
-		object->containerId = maxContainerId;
-		std::shared_ptr<obj_group_t> group = std::make_shared<obj_group_t>();
-
-		std::map<std::string, obj_index_t> indices;
-		std::vector<obj_vector3_t> positions;
-		std::vector<obj_vector3_t> normals;
-		std::vector<obj_vector2_t> uvs;
-		obj_index_t index = 0;
-
-		std::ifstream objFile(objFilePath);
-		std::string line;
-		int lineNo = 0;
-
-		auto objState = std::make_shared<obj_state_t>();
-		objStates.push_back(objState);
-
-		std::cout << "Parsing OBJ '" << objFilePath << "'..." << std::endl;
-		while(std::getline(objFile, line))
-		{
-			++lineNo;
-			std::istringstream iss(line);
-			//std::cout << line << "\n";
-			if(line.empty()) continue;
-
-			std::string entryType;
-			if(!(iss >> entryType))
-			{
-				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Failed to parse entry type." << std::endl;
-				break;
-
-			}
-
-			if(entryType == "mtllib")
-			{
-				if(!(iss >> objState->materialFileName))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-				
-				objState->materialFileName = objState->materialFileName.substr(objState->materialFileName.find_last_of("/\\") + 1);
-
-				if(!ReadMTL(relativePath, objState))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Failed to open material file '" << objState->materialFileName << "'" << std::endl;
-					break;
-
-				}
-
-			}
-			else if(entryType == "v")
-			{
-				obj_vector3_t position;
-				if(!(iss >> position.x >> position.y >> position.z))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-
-				positions.push_back(position);
-
-			}
-			else if(entryType == "vn")
-			{
-				obj_vector3_t normal;
-				if(!(iss >> normal.x >> normal.y >> normal.z))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-
-				normals.push_back(normal);
-
-			}
-			else if(entryType == "vt")
-			{
-				obj_vector2_t uv;
-				float w;
-				if(!(iss >> uv.x >> uv.y))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-				else if((iss >> w) && w > 0.0f)
-				{
-					if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] 3D texture coordinates are not supported, W component has been discarded." << std::endl;
-
-				}
-
-				uvs.push_back(uv);
-
-			}
-			else if(entryType == "g" || entryType == "o")
-			{
-				if(!isFirstGroup) group = std::make_shared<obj_group_t>();
-				if(!isFirstObject)
-				{
-					object = std::make_shared<obj_object_t>();
-					object->name = objectName;
-
-				}
-				object->containerId = maxContainerId;
-
-				//positions.clear();
-				//uvs.clear();
-				//normals.clear();
-				indices.clear();
-				index = 0;
-
-				if(!(iss >> group->name))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-
-				group->materialName = objState->materialName;
-				group->materialId = objState->materialId;
-				group->smoothing = objState->smoothing;
-
-				object->groups.push_back(group);
-				isFirstGroup = false;
-				
-				objState->objects.push_back(object);
-				isFirstObject = false;
-
-			}
-			else if(entryType == "usemtl")
-			{
-				if(!(iss >> objState->materialName))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-
-				bool foundMaterial = false;
-
-				for(const auto &material : objState->mtlState->materials)
-				{
-					if(material.second->name == objState->materialName)
-					{
-						objState->materialId = material.second->id;
-						foundMaterial = true;
-						break;
-
-					}
-
-				}
-
-				if(!foundMaterial)
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Could not find material '" << objState->materialName << "'" << std::endl;
-					break;
-
-				}
-
-				group->materialName = objState->materialName;
-				group->materialId = objState->materialId;
-
-			}
-			else if(entryType == "s")
-			{
-				std::string smoothing;
-				if(!(iss >> smoothing))
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-
-				if(smoothing == "off") objState->smoothing = 0;
-				else if(smoothing == "on") objState->smoothing = 1;
-				else objState->smoothing = std::stoi(smoothing);
-
-				group->smoothing = objState->smoothing;
-
-			}
-			else if(entryType == "f")
-			{
-				struct obj_index_t
-				{
-					int a = 0, b = 0, c = 0, d = 0;
-
-				} position, uv, normal;
-				std::smatch matches;
-				
-				// Non-Indexed Geometry
-				auto makeNonIndexedVertices = [&](const auto &positionIndex, const auto &normalIndex, const auto &uvIndex)
-				{
-					if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
-					if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
-					if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
-
-				};
-				
-				// Indexed Geometry
-				auto makeFaceIndex = [&](auto &faceIndex, const auto &positionIndex, const auto &normalIndex, const auto &uvIndex)
-				{
-					auto cacheIndexKey = std::to_string(positionIndex) + "," + std::to_string(normalIndex) + "," + std::to_string(uvIndex);
-					auto cachedIndex = indices.find(cacheIndexKey);
-					if(cachedIndex == indices.end())
-					{
-						indices.insert(std::make_pair(cacheIndexKey, index));
-						faceIndex = index++;
-
-						if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
-						if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
-						if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
-
-					}
-					else
-					{
-						faceIndex = cachedIndex->second;
-
-					}
-
-				};
-				
-				int numFaces = 0;
-
-				if(std::regex_search(line, matches, FACE_POSITION_UV_NORMAL) && matches.size() >= 10)
-				{
-					numFaces = 3;
-
-					position = { std::stoi(matches.str(1)), std::stoi(matches.str(4)), std::stoi(matches.str(7)) };
-					uv = { std::stoi(matches.str(2)), std::stoi(matches.str(5)), std::stoi(matches.str(8)) };
-					normal = { std::stoi(matches.str(3)), std::stoi(matches.str(6)), std::stoi(matches.str(9)) };
-					
-					if(matches.size() >= 13 && !matches.str(10).empty() && !matches.str(11).empty() && !matches.str(12).empty())
-					{
-						position.d = std::stoi(matches.str(10));
-						uv.d = std::stoi(matches.str(11));
-						normal.d = std::stoi(matches.str(12));
-						++numFaces;
-
-					}
-
-					if(matches.size() >= 16 && !matches.str(13).empty() && !matches.str(14).empty() && !matches.str(15).empty()) ++numFaces;
-
-				}
-				else if(std::regex_search(line, matches, FACE_POSITION_UV) && matches.size() >= 7)
-				{
-					numFaces = 3;
-
-					position = { std::stoi(matches.str(1)), std::stoi(matches.str(3)), std::stoi(matches.str(5)) };
-					uv = { std::stoi(matches.str(2)), std::stoi(matches.str(4)), std::stoi(matches.str(6)) };
-					
-					if(matches.size() >= 9 && !matches.str(7).empty() && !matches.str(8).empty())
-					{
-						position.d = std::stoi(matches.str(7));
-						uv.d = std::stoi(matches.str(8));
-						++numFaces;
-
-					}
-
-					if(matches.size() >= 11 && !matches.str(9).empty() && !matches.str(10).empty()) ++numFaces;
-
-				}
-				else if(std::regex_search(line, matches, FACE_POSITION_NORMAL) && matches.size() >= 7)
-				{
-					numFaces = 3;
-
-					position = { std::stoi(matches.str(1)), std::stoi(matches.str(3)), std::stoi(matches.str(5)) };
-					normal = { std::stoi(matches.str(2)), std::stoi(matches.str(4)), std::stoi(matches.str(6)) };
-					
-					if(matches.size() >= 9 &&!matches.str(7).empty() && !matches.str(8).empty())
-					{
-						position.d = std::stoi(matches.str(7));
-						normal.d = std::stoi(matches.str(8));
-						++numFaces;
-
-					}
-
-					if(matches.size() >= 11 && !matches.str(9).empty() && !matches.str(10).empty()) ++numFaces;
-
-				}
-				else if(std::regex_search(line, matches, FACE_POSITION) && matches.size() >= 4)
-				{
-					numFaces = 3;
-
-					position = { std::stoi(matches.str(1)), std::stoi(matches.str(2)), std::stoi(matches.str(3)) };
-					
-					if(matches.size() >= 5 && !matches.str(4).empty())
-					{
-						position.d = std::stoi(matches.str(4));
-						++numFaces;
-
-					}
-
-					if(matches.size() >= 6 && !matches.str(5).empty()) ++numFaces;
-
-				}
-				
-				if(numFaces == 3)
-				{
-					// Triangles
-					if(createIndexedGeometry)
-					{
-						// Indexed Geometry
-						obj_face3_t face;
-						makeFaceIndex(face.a, position.a, normal.a, uv.a);
-						makeFaceIndex(face.b, position.b, normal.b, uv.b);
-						makeFaceIndex(face.c, position.c, normal.c, uv.c);
-						group->faces.push_back(face);
-
-					}
-					else
-					{
-						// Non-Indexed Geometry
-						makeNonIndexedVertices(position.a, normal.a, uv.a);
-						makeNonIndexedVertices(position.b, normal.b, uv.b);
-						makeNonIndexedVertices(position.c, normal.c, uv.c);
-
-					}
-
-				}
-				else if(numFaces == 4)
-				{
-					// Quads
-					if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Quad geometry faces are automatically triangulated." << std::endl;
-
-					// Triangulate Quad Face
-					if(createIndexedGeometry)
-					{
-						// Indexed Geometry
-						obj_face3_t face;
-						makeFaceIndex(face.a, position.a, normal.a, uv.a);
-						makeFaceIndex(face.b, position.b, normal.b, uv.b);
-						makeFaceIndex(face.c, position.c, normal.c, uv.c);
-						group->faces.push_back(face);
-
-						makeFaceIndex(face.a, position.a, normal.a, uv.a);
-						makeFaceIndex(face.b, position.c, normal.c, uv.c);
-						makeFaceIndex(face.c, position.d, normal.d, uv.d);
-						group->faces.push_back(face);
-
-					}
-					else
-					{
-						// Non-Indexed Geometry
-						makeNonIndexedVertices(position.a, normal.a, uv.a);
-						makeNonIndexedVertices(position.b, normal.b, uv.b);
-						makeNonIndexedVertices(position.c, normal.c, uv.c);
-
-						makeNonIndexedVertices(position.a, normal.a, uv.a);
-						makeNonIndexedVertices(position.c, normal.c, uv.c);
-						makeNonIndexedVertices(position.d, normal.d, uv.d);
-
-					}
-
-				}
-				else if(numFaces > 4)
-				{
-					// N-gons
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] N-gon geometry faces are not supported." << std::endl;
-					break;
-
-				}
-				else
-				{
-					if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-					break;
-
-				}
-
-			}
-			else if(entryType == "#")
-			{
-				continue;
-
-			}
-			else if(entryType == "p" || entryType == "l" || entryType == "curv" || entryType == "curv2" || entryType == "surf")
-			{
-				if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Geometry type '" << entryType << "' is not supported." << std::endl;
-				break;
-
-			}
-			else
-			{
-				if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Skipping unsupported entry type '" << entryType << "'" << std::endl;
-
-			}
-
-		}
-
-		if(isFirstGroup) object->groups.push_back(group);
-		if(isFirstObject) objState->objects.push_back(object);
-
-		objFile.close();
-		
-		++maxContainerId;
+		// Construct Asset For Each OBJ File
+		// TODO:: Add Command Line Options To Allow Asset Construction Consisting Of Multiple OBJ Files
+		auto asset = std::make_shared<bom_asset_t>();
+		asset->name = objFilePath.substr(objFilePath.find_last_of("/\\") + 1);
+
+		if(ReadOBJ(asset, objFilePath)) assets.push_back(asset);
 
 	}
 
-	WriteBOM(bomFilePath);
+	WriteBOM(assets, bomFilePath);
 
 	//system("PAUSE");
 	return 0;
