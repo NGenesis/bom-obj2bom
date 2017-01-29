@@ -9,6 +9,7 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 - Combine multi-part models consisting of many OBJ/MTL files into a single BOM file.
 - Automatic conversion of quad face geometry into triangulated face geometry.
 - Automatic indexing of geometry buffers.
+- Comment annotation syntax for MTL provides support for embedding non-standard material properties into BOM file.
 
 ## Known Issues
 - Texture scaling and offset parameters in map_* are not currently parsed.
@@ -16,3 +17,18 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 - N-gon face geometry is not supported.
 - Point/Line/Curve/Surface geometry is not supported.
 - 3D texture coordinates are not supported.
+
+## MTL Comment Annotation Syntax
+`# :[vendor]: [property] [[-flag1] [value1] [value2] [...valueN]] [[-flag2] [value1] [value2] [...valueN]] [[...-flagN] [value1] [value2] [...valueN]] [value1] [value2] [...valueN]`
+
+### BOM Material Properties
+
+#### Face Culling (cull_face)
+##### Syntax:
+`# :BOM: cull_face [none|front|back|all]`
+
+##### Available options:
+- `none`: Disables culling of faces, used to display double sided materials.
+- `front`: Culls only front faces.
+- `back`: Culls only back faces.
+- `all`: Culls both front and back faces.
