@@ -19,6 +19,9 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 - 3D texture coordinates are not supported.
 
 ## MTL Comment Annotation Syntax
+Comment annotation syntax provides support for embedding non-standard material properties into BOM file without breaking compliance with the MTL file specification.
+
+### Syntax
 `# :[vendor]: [property] [[-flag1] [value1] [value2] [...valueN]] [[-flag2] [value1] [value2] [...valueN]] [[...-flagN] [value1] [value2] [...valueN]] [value1] [value2] [...valueN]`
 
 ### BOM Material Properties
