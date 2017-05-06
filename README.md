@@ -12,7 +12,7 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 - Supports two UV channels and lightmap channel.
 - Comment Annotation Syntax for OBJ and MTL provides support for embedding BOM properties into OBJ/MTL files without breaking existing parsers.
 
-## Known Issues
+## Known Limitations
 - Texture scaling and offset parameters in map_* are not currently parsed.
 - Bump and displacement scaling parameters in bump/disp are not currently parsed.
 - N-gon face geometry is not supported.
