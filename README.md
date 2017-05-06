@@ -9,7 +9,8 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 - Combine multi-part models consisting of many OBJ/MTL files into a single BOM file.
 - Automatic conversion of quad face geometry into triangulated face geometry.
 - Automatic indexing of geometry buffers.
-- Comment annotation syntax for MTL provides support for embedding non-standard material properties into BOM file.
+- Supports two UV channels and lightmap channel.
+- Comment annotation syntax for OBJ and MTL provides support for embedding BOM properties into OBJ/MTL files without breaking existing parsers.
 
 ## Known Issues
 - Texture scaling and offset parameters in map_* are not currently parsed.
