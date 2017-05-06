@@ -21,14 +21,19 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 ## Comment Annotation Syntax (CAS)
 Comment Annotation Syntax provides support for embedding non-standard BOM geometry and material properties into OBJ and MTL files using comment lines without breaking compliance with existing OBJ/MTL file specifications and parsers.
 
+Note that the characters `<>[]` in the provided documentation are not considered literal syntax.
+- `<property>` denotes a required property.
+- `[property]` denotes an optional property.
+- No indication denotes a required literal property.
+
 ### Syntax
-`# :[vendor]: [property] [[-flag1] [value1] [value2] [...valueN]] [[-flag2] [value1] [value2] [...valueN]] [[...-flagN] [value1] [value2] [...valueN]]`
+`# :<vendor>: <property> [[-flag1] [value1] [value2] [...valueN]] [[-flag2] [value1] [value2] [...valueN]] [[...-flagN] [value1] [value2] [...valueN]]`
 
 ### BOM Material Properties (MTL-compatible)
 
 #### Face Culling (cull_face)
 ##### Syntax:
-`# :BOM: cull_face [none|front|back|all]`
+`# :BOM: cull_face <none|front|back|all>`
 
 ##### Available options:
 - `none`: Disables culling of faces, used to display double sided materials.
@@ -38,17 +43,17 @@ Comment Annotation Syntax provides support for embedding non-standard BOM geomet
 
 #### Light Map (lightmap)
 ##### Syntax:
-`# :BOM: lightmap [-intensity [intensity]] path`
+`# :BOM: lightmap [-intensity <intensity>] <path>`
 
 ##### Available options:
-- `-intensity [intensity]`: Intensity modifier to be applied to the light map, where a larger modifier produces a greater intensity.  Defaults to 1.
+- `-intensity <intensity_modifier>`: Intensity modifier to be applied to the light map, where a larger modifier produces a greater intensity.  Defaults to 1.
 - `path`: File path of the light map texture file.
 
 ### BOM Geometry Properties (OBJ-compatible)
 
 #### UV Channel 2 (vt2)
 ##### Syntax:
-`# :BOM: vt2 u v [w]`
+`# :BOM: vt2 <u> <v> [w]`
 
 ##### Available options:
 - `u`: U component of a 2D texture coordinate.
