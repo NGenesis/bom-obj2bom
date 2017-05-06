@@ -36,6 +36,14 @@ Comment Annotation Syntax provides support for embedding non-standard BOM geomet
 - `back`: Culls only back faces.
 - `all`: Culls both front and back faces.
 
+#### Light Map (lightmap)
+##### Syntax:
+`# :BOM: lightmap [-intensity [intensity]] path`
+
+##### Available options:
+- `-intensity [intensity]`: Intensity modifier to be applied to the light map, where a larger modifier produces a greater intensity.  Defaults to 1.
+- `path`: File path of the light map texture file.
+
 ### BOM Geometry Properties (OBJ-compatible)
 
 #### UV Channel 2 (vt2)
