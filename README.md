@@ -2,7 +2,7 @@
 A command line tool to convert OBJ and associated MTL files to BOM (Binary Object/Material) file format.
 
 ## Command Line Usage
-`obj2bom [output.bom] [input1.obj] [input2.obj] [...inputN.obj]`
+`obj2bom <output.bom> <input1.obj> [input2.obj] [...inputN.obj]`
 
 ## Features
 - Convert OBJ/MTL files in to a compact binary representation for efficient storage, transport and parsing.
