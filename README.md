@@ -18,13 +18,13 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 - Point/Line/Curve/Surface geometry is not supported.
 - 3D texture coordinates are not supported.
 
-## MTL Comment Annotation Syntax
-Comment annotation syntax provides support for embedding non-standard material properties into BOM file without breaking compliance with the MTL file specification.
+## Comment Annotation Syntax (CAS)
+Comment Annotation Syntax provides support for embedding non-standard BOM geometry and material properties into OBJ and MTL files using comment lines without breaking compliance with existing OBJ/MTL file specifications and parsers.
 
 ### Syntax
-`# :[vendor]: [property] [[-flag1] [value1] [value2] [...valueN]] [[-flag2] [value1] [value2] [...valueN]] [[...-flagN] [value1] [value2] [...valueN]] [value1] [value2] [...valueN]`
+`# :[vendor]: [property] [[-flag1] [value1] [value2] [...valueN]] [[-flag2] [value1] [value2] [...valueN]] [[...-flagN] [value1] [value2] [...valueN]]`
 
-### BOM Material Properties
+### BOM Material Properties (MTL-compatible)
 
 #### Face Culling (cull_face)
 ##### Syntax:
@@ -35,3 +35,14 @@ Comment annotation syntax provides support for embedding non-standard material p
 - `front`: Culls only front faces.
 - `back`: Culls only back faces.
 - `all`: Culls both front and back faces.
+
+### BOM Geometry Properties (OBJ-compatible)
+
+#### UV Channel 2 (vt2)
+##### Syntax:
+`# :BOM: vt2 u v [w]`
+
+##### Available options:
+- `u`: U component of a 2D texture coordinate.
+- `v`: V component of a 2D texture coordinate.
+- `w`: W component of a 3D texture coordinate.  Reserved for future use and is currently skipped by the parser.
