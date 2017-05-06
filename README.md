@@ -43,7 +43,7 @@ Note that the characters `<>[]` in the provided documentation are not considered
 
 #### Light Map (lightmap)
 ##### Syntax:
-`# :BOM: lightmap [-intensity <intensity>] <path>`
+`# :BOM: lightmap [-intensity <intensity_modifier>] <path>`
 
 ##### Available options:
 - `-intensity <intensity_modifier>`: Intensity modifier to be applied to the light map, where a larger modifier produces a greater intensity.  Defaults to 1.
