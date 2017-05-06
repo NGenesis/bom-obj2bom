@@ -21,9 +21,10 @@ A command line tool to convert OBJ and associated MTL files to BOM (Binary Objec
 ## Comment Annotation Syntax (CAS)
 Comment Annotation Syntax provides support for embedding non-standard BOM geometry and material properties into OBJ and MTL files using comment lines without breaking compliance with existing OBJ/MTL file specifications and parsers.
 
-Note that the characters `<>[]` in the provided documentation are not considered literal syntax.
+Note that the characters `<>[]|` in the provided documentation are not considered literal syntax.
 - `<property>` denotes a required property.
 - `[property]` denotes an optional property.
+- `<property1|property2|property3>` or `[property1|property2|property3]` denotes a required or optional property which can be one of several available properties.
 - No indication denotes a required literal property.
 
 ### Syntax
