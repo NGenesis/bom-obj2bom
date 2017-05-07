@@ -956,93 +956,322 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 		}
 		else if(entryType == "map_Ka")
 		{
-			if(!(iss >> material->ambientMap.path))
+			std::string optionType;
+			while((iss >> optionType))
 			{
-				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-				break;
+				if(optionType == "-o")
+				{
+					if(!(iss >> material->ambientMap.offset.x >> material->ambientMap.offset.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->ambientMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::AMBIENT_MAP);
+
+				}
+				else if(optionType == "-s")
+				{
+					if(!(iss >> material->ambientMap.scale.x >> material->ambientMap.scale.y))
+					{
+						if(logWarnings) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->ambientMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::AMBIENT_MAP);
+
+				}
+				else
+				{
+					material->ambientMap.path = optionType;
+					material->ambientMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::AMBIENT_MAP);
+					break;
+
+				}
 
 			}
-			
-			material->ambientMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
-			material->attributes |= BitmaskFlag(MaterialDataAttribute::AMBIENT_MAP);
 
 		}
 		else if(entryType == "map_Kd")
 		{
-			if(!(iss >> material->diffuseMap.path))
+			std::string optionType;
+			while((iss >> optionType))
 			{
-				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-				break;
+				if(optionType == "-o")
+				{
+					if(!(iss >> material->diffuseMap.offset.x >> material->diffuseMap.offset.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->diffuseMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DIFFUSE_MAP);
+
+				}
+				else if(optionType == "-s")
+				{
+					if(!(iss >> material->diffuseMap.scale.x >> material->diffuseMap.scale.y))
+					{
+						if(logWarnings) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->diffuseMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DIFFUSE_MAP);
+
+				}
+				else
+				{
+					material->diffuseMap.path = optionType;
+					material->diffuseMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DIFFUSE_MAP);
+					break;
+
+				}
 
 			}
-			
-			material->diffuseMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
-			material->attributes |= BitmaskFlag(MaterialDataAttribute::DIFFUSE_MAP);
 
 		}
 		else if(entryType == "map_Ks")
 		{
-			if(!(iss >> material->specularMap.path))
+			std::string optionType;
+			while((iss >> optionType))
 			{
-				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-				break;
+				if(optionType == "-o")
+				{
+					if(!(iss >> material->specularMap.offset.x >> material->specularMap.offset.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->specularMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::SPECULAR_MAP);
+
+				}
+				else if(optionType == "-s")
+				{
+					if(!(iss >> material->specularMap.scale.x >> material->specularMap.scale.y))
+					{
+						if(logWarnings) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->specularMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::SPECULAR_MAP);
+
+				}
+				else
+				{
+					material->specularMap.path = optionType;
+					material->specularMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::SPECULAR_MAP);
+					break;
+
+				}
 
 			}
-			
-			material->specularMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
-			material->attributes |= BitmaskFlag(MaterialDataAttribute::SPECULAR_MAP);
 
 		}
 		else if(entryType == "map_Ke")
 		{
-			if(!(iss >> material->emissiveMap.path))
+			std::string optionType;
+			while((iss >> optionType))
 			{
-				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-				break;
+				if(optionType == "-o")
+				{
+					if(!(iss >> material->emissiveMap.offset.x >> material->emissiveMap.offset.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->emissiveMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::EMISSIVE_MAP);
+
+				}
+				else if(optionType == "-s")
+				{
+					if(!(iss >> material->emissiveMap.scale.x >> material->emissiveMap.scale.y))
+					{
+						if(logWarnings) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->emissiveMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::EMISSIVE_MAP);
+
+				}
+				else
+				{
+					material->emissiveMap.path = optionType;
+					material->emissiveMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::EMISSIVE_MAP);
+					break;
+
+				}
 
 			}
-			
-			material->emissiveMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
-			material->attributes |= BitmaskFlag(MaterialDataAttribute::EMISSIVE_MAP);
 
 		}
 		else if(entryType == "map_d")
 		{
-			if(!(iss >> material->dissolveMap.path))
+			std::string optionType;
+			while((iss >> optionType))
 			{
-				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-				break;
+				if(optionType == "-o")
+				{
+					if(!(iss >> material->dissolveMap.offset.x >> material->dissolveMap.offset.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->dissolveMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DISSOLVE_MAP);
+
+				}
+				else if(optionType == "-s")
+				{
+					if(!(iss >> material->dissolveMap.scale.x >> material->dissolveMap.scale.y))
+					{
+						if(logWarnings) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->dissolveMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DISSOLVE_MAP);
+
+				}
+				else
+				{
+					material->dissolveMap.path = optionType;
+					material->dissolveMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DISSOLVE_MAP);
+					break;
+
+				}
 
 			}
-			
-			material->dissolveMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
-			material->attributes |= BitmaskFlag(MaterialDataAttribute::DISSOLVE_MAP);
 
 		}
 		else if(entryType == "map_bump" || entryType == "bump")
 		{
-			if(!(iss >> material->bumpMap.path))
+			std::string optionType;
+			while((iss >> optionType))
 			{
-				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-				break;
+				if(optionType == "-bm")
+				{
+					if(!(iss >> material->bumpMap.bumpScale))
+					{
+						if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->bumpMap.attributes |= BitmaskFlag(MapDataAttribute::BUMP_SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::BUMP_MAP);
+
+				}
+				else if(optionType == "-o")
+				{
+					if(!(iss >> material->bumpMap.offset.x >> material->bumpMap.offset.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->bumpMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::BUMP_MAP);
+
+				}
+				else if(optionType == "-s")
+				{
+					if(!(iss >> material->bumpMap.scale.x >> material->bumpMap.scale.y))
+					{
+						if(logWarnings) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->bumpMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::BUMP_MAP);
+
+				}
+				else
+				{
+					material->bumpMap.path = optionType;
+					material->bumpMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::BUMP_MAP);
+					break;
+
+				}
 
 			}
-
-			material->bumpMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
-			material->attributes |= BitmaskFlag(MaterialDataAttribute::BUMP_MAP);
 
 		}
 		else if(entryType == "map_disp" || entryType == "disp")
 		{
-			if(!(iss >> material->displacementMap.path))
+			std::string optionType;
+			while((iss >> optionType))
 			{
-				if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
-				break;
+				if(optionType == "-o")
+				{
+					if(!(iss >> material->displacementMap.offset.x >> material->displacementMap.offset.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->displacementMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP);
+
+				}
+				else if(optionType == "-s")
+				{
+					if(iss >> material->displacementMap.scale.x >> material->displacementMap.scale.y >> material->displacementMap.displacementScale)
+					{
+						material->displacementMap.attributes |= BitmaskFlag(MapDataAttribute::DISPLACEMENT_SCALE);
+						material->attributes |= BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP);
+
+					}
+					else if(!(iss >> material->displacementMap.scale.x >> material->displacementMap.scale.y))
+					{
+						if(logWarnings) std::cout << "ERROR: [" << objState->materialFileName << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						break;
+
+					}
+
+					material->displacementMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP);
+
+				}
+				else
+				{
+					material->displacementMap.path = optionType;
+					material->displacementMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+					material->attributes |= BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP);
+					break;
+
+				}
 
 			}
-
-			material->displacementMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
-			material->attributes |= BitmaskFlag(MaterialDataAttribute::DISPLACEMENT_MAP);
 
 		}
 		else
