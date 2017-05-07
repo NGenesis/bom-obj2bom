@@ -67,7 +67,8 @@ enum class GeometryDataAttribute : std::uint16_t
 {
 	NONE = 1 << 0,
 	NORMAL = 1 << 1,
-	UV = 1 << 2
+	UV = 1 << 2,
+	UV2 = 1 << 3
 
 };
 
@@ -90,7 +91,8 @@ enum class MaterialDataAttribute : std::uint32_t
 	DISSOLVE_MAP = 1 << 14,
 	BUMP_MAP = 1 << 15,
 	DISPLACEMENT_MAP = 1 << 16,
-	FACE_CULLING = 1 << 17
+	FACE_CULLING = 1 << 17,
+	LIGHT_MAP = 1 << 18
 
 };
 
@@ -101,7 +103,8 @@ enum class MapDataAttribute : std::uint16_t
 	SCALE = 1 << 2,
 	OFFSET = 1 << 3,
 	BUMP_SCALE = 1 << 4,
-	DISPLACEMENT_SCALE = 1 << 5
+	DISPLACEMENT_SCALE = 1 << 5,
+	LIGHTMAP_INTENSITY = 1 << 6
 
 };
 
@@ -138,6 +141,7 @@ struct mtl_map_t
 	{
 		float bumpScale;
 		float displacementScale;
+		float lightmapIntensity;
 
 	};
 
@@ -152,7 +156,7 @@ struct mtl_material_t
 	std::uint8_t illuminationModel;
 	float specularExponent, opticalDensity, dissolve;
 	mtl_color_t transmissionFilter, ambientReflectance, diffuseReflectance, specularReflectance, emissiveReflectance;
-	mtl_map_t ambientMap, diffuseMap, specularMap, emissiveMap, dissolveMap, bumpMap, displacementMap;
+	mtl_map_t ambientMap, diffuseMap, specularMap, emissiveMap, dissolveMap, bumpMap, displacementMap, lightMap;
 	FaceCulling faceCulling;
 
 };
@@ -178,7 +182,7 @@ struct obj_object_t
 {
 	std::vector<obj_vector3_t> positions;
 	std::vector<obj_vector3_t> normals;
-	std::vector<obj_vector2_t> uvs;
+	std::vector<obj_vector2_t> uvs, uvs2;
 	std::vector<std::shared_ptr<obj_group_t>> groups;
 
 };
@@ -200,7 +204,6 @@ struct bom_asset_t
 
 };
 
-//std::vector<std::shared_ptr<obj_state_t>> objStates;
 std::vector<std::shared_ptr<mtl_state_t>> mtlStates;
 std::uint16_t maxMaterialId = 0;
 
@@ -468,6 +471,35 @@ bool WriteBOM(const std::vector<std::shared_ptr<bom_asset_t>> &assets, const std
 				// Face Culling (cull_face)
 				if(materialAttributes & BitmaskFlag(MaterialDataAttribute::FACE_CULLING)) bomFile.write(reinterpret_cast<char*>(&material.second->faceCulling), sizeof(material.second->faceCulling));
 
+				// Light Map (lightmap)
+				if(materialAttributes & BitmaskFlag(MaterialDataAttribute::LIGHT_MAP))
+				{
+					const auto map = &material.second->lightMap;
+
+					// Map Data Attributes
+					auto mapAttributes = map->attributes;
+					bomFile.write(reinterpret_cast<char*>(&mapAttributes), sizeof(mapAttributes));
+					
+					// Map Path
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::PATH))
+					{
+						std::uint16_t pathCount = map->path.size();
+						bomFile.write(reinterpret_cast<char*>(&pathCount), sizeof(pathCount));
+						bomFile.write(map->path.c_str(), pathCount);
+
+					}
+					
+					// Map Scale
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->scale), sizeof(map->scale));
+					
+					// Map Offset
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::SCALE)) bomFile.write(reinterpret_cast<char*>(&map->offset), sizeof(map->offset));
+					
+					// Light Map Intensity
+					if(mapAttributes & BitmaskFlag(MapDataAttribute::LIGHTMAP_INTENSITY)) bomFile.write(reinterpret_cast<char*>(&map->lightmapIntensity), sizeof(map->lightmapIntensity));
+
+				}
+
 			}
 
 		}
@@ -514,6 +546,7 @@ bool WriteBOM(const std::vector<std::shared_ptr<bom_asset_t>> &assets, const std
 					auto geometryAttributes = BitmaskFlag(GeometryDataAttribute::NONE);
 					if(!object->normals.empty()) geometryAttributes |= BitmaskFlag(GeometryDataAttribute::NORMAL);
 					if(!object->uvs.empty()) geometryAttributes |= BitmaskFlag(GeometryDataAttribute::UV);
+					if(!object->uvs2.empty()) geometryAttributes |= BitmaskFlag(GeometryDataAttribute::UV2);
 					bomFile.write(reinterpret_cast<char*>(&geometryAttributes), sizeof(geometryAttributes));
 
 					// Vertex Count
@@ -528,6 +561,7 @@ bool WriteBOM(const std::vector<std::shared_ptr<bom_asset_t>> &assets, const std
 
 					// Vertex UVs
 					if(geometryAttributes & BitmaskFlag(GeometryDataAttribute::UV)) bomFile.write(reinterpret_cast<char*>(object->uvs.data()), sizeof(float) * vertexCount * 2);
+					if(geometryAttributes & BitmaskFlag(GeometryDataAttribute::UV2)) bomFile.write(reinterpret_cast<char*>(object->uvs2.data()), sizeof(float) * vertexCount * 2);
 
 				}
 
@@ -631,7 +665,7 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 		if(entryType == "#")
 		{
 			// Attempt to parse out vendor-specific material property
-			// # :[vendor]: [property] [value0] [value1] [valueN...]
+			// # :<vendor>: <property> [value0] [value1] [valueN...]
 			if((iss >> entryType) && entryType == ":BOM:")
 			{
 				if(!(iss >> entryType))
@@ -644,7 +678,7 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 				if(entryType == "cull_face")
 				{
 					// Face Culling Preference (cull_face)
-					// cull_face [none|front|back|all]
+					// :BOM: cull_face <none|front|back|all>
 					// none (0x00): No face culling is applied.
 					// front (0x01): Front faces are culled.
 					// back (0x02): Back faces are culled.
@@ -684,6 +718,80 @@ bool ReadMTL(const std::string &relativePath, std::shared_ptr<obj_state_t> objSt
 					}
 
 					material->attributes |= BitmaskFlag(MaterialDataAttribute::FACE_CULLING);
+
+				}
+				else if(entryType == "lightmap")
+				{
+					// Light Map (lightmap)
+					// :BOM: lightmap [-o <offset_u> <offset_v>] [-s <scale_u> <scale_v>] [-intensity <intensity_modifier>] <path>
+
+					// Texture Offset
+					// -o <offset_u> <offset_v>
+					// Specifies UV offset of the light map texture.
+
+					// Texture Scale
+					// -s <scale_u> <scale_v>
+					// Specifies UV scaling of the light map texture.
+
+					// Lightmap Intensity Option
+					// -intensity <intensity_modifier>
+					// Intensity modifier to be applied to the light map, where a larger modifier produces a greater intensity. Defaults to 1.
+
+					// Lightmap Path
+					// <path>
+					// File path of the light map texture file.
+					std::string optionType;
+					while((iss >> optionType))
+					{
+						if(optionType == "-intensity")
+						{
+							if(!(iss >> material->lightMap.lightmapIntensity))
+							{
+								if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Vendor-specific entry type '" << entryType << "' could not be parsed and will be skipped." << std::endl;
+								break;
+
+							}
+
+							material->lightMap.attributes |= BitmaskFlag(MapDataAttribute::LIGHTMAP_INTENSITY);
+							material->attributes |= BitmaskFlag(MaterialDataAttribute::LIGHT_MAP);
+
+						}
+						else if(optionType == "-o")
+						{
+							if(!(iss >> material->lightMap.offset.x >> material->lightMap.offset.y))
+							{
+								if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Vendor-specific entry type '" << entryType << "' could not be parsed and will be skipped." << std::endl;
+								break;
+
+							}
+
+							material->lightMap.attributes |= BitmaskFlag(MapDataAttribute::OFFSET);
+							material->attributes |= BitmaskFlag(MaterialDataAttribute::LIGHT_MAP);
+
+						}
+						else if(optionType == "-s")
+						{
+							if(!(iss >> material->lightMap.scale.x >> material->lightMap.scale.y))
+							{
+								if(logWarnings) std::cout << "WARNING: [" << objState->materialFileName << ":" << lineNo << "] Vendor-specific entry type '" << entryType << "' could not be parsed and will be skipped." << std::endl;
+								break;
+
+							}
+
+							material->lightMap.attributes |= BitmaskFlag(MapDataAttribute::SCALE);
+							material->attributes |= BitmaskFlag(MaterialDataAttribute::LIGHT_MAP);
+
+						}
+						else
+						{
+							material->lightMap.path = optionType;
+							material->lightMap.attributes |= BitmaskFlag(MapDataAttribute::PATH);
+							material->attributes |= BitmaskFlag(MaterialDataAttribute::LIGHT_MAP);
+							break;
+
+						}
+
+					}
 
 				}
 
@@ -974,7 +1082,7 @@ bool ReadOBJ(std::shared_ptr<bom_asset_t> asset, const std::string &objFilePath)
 
 	std::map<std::string, obj_index_t> indices;
 	std::vector<obj_vector3_t> positions, normals;
-	std::vector<obj_vector2_t> uvs;
+	std::vector<obj_vector2_t> uvs, uvs2;
 	obj_index_t index = 0;
 
 	bool isFirstObject = true, isFirstGroup = true;
@@ -1156,6 +1264,7 @@ bool ReadOBJ(std::shared_ptr<bom_asset_t> asset, const std::string &objFilePath)
 				if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
 				if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
 				if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
+				if(!uvs2.empty()) object->uvs2.push_back(uvs2[uvIndex >= 0 ? (uvIndex - 1) : (uvs2.size() + uvIndex)]);
 
 			};
 			
@@ -1172,6 +1281,7 @@ bool ReadOBJ(std::shared_ptr<bom_asset_t> asset, const std::string &objFilePath)
 					if(!positions.empty()) object->positions.push_back(positions[positionIndex >= 0 ? (positionIndex - 1) : (positions.size() + positionIndex)]);
 					if(!normals.empty()) object->normals.push_back(normals[normalIndex >= 0 ? (normalIndex - 1) : (normals.size() + normalIndex)]);
 					if(!uvs.empty()) object->uvs.push_back(uvs[uvIndex >= 0 ? (uvIndex - 1) : (uvs.size() + uvIndex)]);
+					if(!uvs2.empty()) object->uvs2.push_back(uvs2[uvIndex >= 0 ? (uvIndex - 1) : (uvs2.size() + uvIndex)]);
 
 				}
 				else
@@ -1332,7 +1442,40 @@ bool ReadOBJ(std::shared_ptr<bom_asset_t> asset, const std::string &objFilePath)
 		}
 		else if(entryType == "#")
 		{
-			continue;
+			// Attempt to parse out vendor-specific geometry property
+			// # :<vendor>: <property> [value0] [value1] [valueN...]
+			if((iss >> entryType) && entryType == ":BOM:")
+			{
+				if(!(iss >> entryType))
+				{
+					if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] Vendor-specific geometry entry type could not be parsed and will be skipped." << std::endl;
+					continue;
+
+				}
+
+				if(entryType == "vt2")
+				{
+					// UV Channel 2 (vt2)
+					// :BOM: vt2 <u> <v> [w]
+					obj_vector2_t uv2;
+					float w;
+					if(!(iss >> uv2.x >> uv2.y))
+					{
+						if(logErrors) std::cout << "ERROR: [" << objFilePath << ":" << lineNo << "] Syntax error while parsing entry type '" << entryType << "'" << std::endl;
+						return false;
+
+					}
+					else if((iss >> w) && w > 0.0f)
+					{
+						if(logWarnings) std::cout << "WARNING: [" << objFilePath << ":" << lineNo << "] 3D texture coordinates are not supported, W component has been discarded." << std::endl;
+
+					}
+
+					uvs2.push_back(uv2);
+
+				}
+
+			}
 
 		}
 		else if(entryType == "p" || entryType == "l" || entryType == "curv" || entryType == "curv2" || entryType == "surf")
@@ -1361,8 +1504,8 @@ bool ReadOBJ(std::shared_ptr<bom_asset_t> asset, const std::string &objFilePath)
 
 int main(int argc, char *argv[])
 {
-	std::string bomFilePath;//"BACK_butterfly_blue.bom";
-	std::vector<std::string> objFilePaths;//{ "BACK_butterfly_blue.obj" };
+	std::string bomFilePath;
+	std::vector<std::string> objFilePaths;
 
 	if(argc >= 2) bomFilePath = argv[1];
 	if(bomFilePath.empty())
@@ -1394,8 +1537,6 @@ int main(int argc, char *argv[])
 	}
 
 	WriteBOM(assets, bomFilePath);
-
-	//system("PAUSE");
 	return 0;
 
 }
