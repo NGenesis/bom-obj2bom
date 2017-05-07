@@ -61,3 +61,6 @@ Note that the characters `<>[]|` in the provided documentation are not considere
 - `u`: U component of a 2D texture coordinate.
 - `v`: V component of a 2D texture coordinate.
 - `w`: W component of a 3D texture coordinate.  Reserved for future use and is currently skipped by the parser.
+
+## See also
+[bom-three.js](https://github.com/NGenesis/bom-three.js) - A javascript loader to parse and load BOM (Binary Object/Material) files in three.js.
