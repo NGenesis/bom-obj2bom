@@ -45,9 +45,11 @@ Note that the characters `<>[]|` in the provided documentation are not considere
 
 #### Light Map (lightmap)
 ##### Syntax:
-`# :BOM: lightmap [-intensity <intensity_modifier>] <path>`
+`# :BOM: lightmap [-o <offset_u> <offset_v>] [-s <scale_u> <scale_v>] [-intensity <intensity_modifier>] <path>`
 
 ##### Available options:
+- `-o <offset_u> <offset_v>`: Specifies UV offset of the light map texture.
+- `-s <scale_u> <scale_v>`: Specifies UV scaling of the light map texture.
 - `-intensity <intensity_modifier>`: Intensity modifier to be applied to the light map, where a larger modifier produces a greater intensity.  Defaults to 1.
 - `path`: File path of the light map texture file.
 
